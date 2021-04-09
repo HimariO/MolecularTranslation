@@ -3,7 +3,9 @@
 import os
 import glob
 import json
+import pickle
 import random
+import shutil
 import multiprocessing as mp
 import matplotlib.pyplot as plt
 from collections import Counter, defaultdict
@@ -352,13 +354,16 @@ def generate_img_and_box(args):
             img_path = os.path.join(output_dir, relative_path.replace('.png', f'.{j}.png'))
             json_path = os.path.join(output_dir, relative_path.replace('.png', f'.{j}.json'))
             
+            svg_img = svg_to_image(svg).astype(np.uint8)
+            svg_img = apply_image_noise(svg_img)
+            svg_pil = Image.fromarray(svg_img)
+            svg_pil.save(img_path)
             det_anno = {
                 'image_id': row.image_id,
                 'boxes': boxes_anno,
+                'image_width': svg_pil.size[0],
+                'image_height': svg_pil.size[1],
             }
-            svg_img = svg_to_image(svg).astype(np.uint8)
-            svg_img = apply_image_noise(svg_img)
-            Image.fromarray(svg_img).save(img_path)
             with open(json_path, mode='w') as f:
                 json.dump(det_anno, f)
 
@@ -429,6 +434,94 @@ def bbox_json_breakdown(anno_path, bms_root):
         #     break
         # break
 
+
+def count_bbox_type(det_dataset):
+    """
+    {
+        '-': 93665516,
+        '=': 31876144,
+        'C0': 87155530,
+        'N0': 12776640,
+        'O0': 11997642,
+        'F0': 1869434,
+        'I0': 58946,
+        'S0': 1860626,
+        '#': 336700,
+        'Cl0': 1075260,
+        'Br0': 426102,
+        'H': 219538,
+        'B0': 13016,
+        'Si0': 44308,
+        'H0': 13530,
+        'P0': 39384,
+        'Cl3': 90,
+        'O-1': 780,
+        'O1': 1244,
+        'Si-1': 1312,
+        'C-1': 966,
+        'C1': 282,
+        'B1': 1286,
+        'N1': 288,
+        'N-1': 400,
+        'Si1': 144,
+        'F1': 8,
+        'P1': 34,
+        'B-1': 62,
+        'I3': 6,
+        'S-1': 10,
+        'S1': 6,
+        'P-1': 14,
+        'Br1': 2,
+        'H1': 2,
+        'Cl2': 2
+    }
+    """
+    name2json = glob.glob(os.path.join(det_dataset, '*', '*', '*', '*.json'))
+    type_cnt = defaultdict(lambda: 0)
+    type2sample = defaultdict(set)
+
+    for i, js_path in enumerate(name2json):
+        if not js_path.endswith('.0.json'):
+            continue
+        if i % 100 == 0:
+            print(f"{i}/{len(name2json)}")
+        with open(js_path, mode='r') as f:
+            anno = json.load(f)
+            for ins in anno['boxes']:
+                type_cnt[ins['type']] += 1
+                type2sample[ins['type']].add(anno['image_id'])
+    with open('type2sample.pickle', mode='wb') as f:
+        pickle.dump(dict(type2sample), f)
+    print(type_cnt)
+
+
+def select_by_cls(type2same_pickle, src_dir, dst_dir):
+    with open(type2same_pickle, 'rb') as f:
+        type2sample = pickle.load(f)
+    type_sam_pair = [(k, v) for k, v in type2sample.items()]
+    type_sam_pair = sorted(type_sam_pair, key=lambda x: len(x[1]))
+
+    sample_set = set()
+    prev_size = 0
+    for cls, samples in type_sam_pair:
+        if len(samples) < 2048:
+            sample_set.update(samples)
+        else:
+            samples = list(samples)
+            random.shuffle(samples)
+            sample_set.update(samples[:4096])
+        print(f"{cls}:\t{len(sample_set)}\t+{len(sample_set) - prev_size}")
+        prev_size = len(sample_set)
+    
+    for sample in sample_set:
+        for ft in ['json', 'png']:
+            for i in range(2):
+                src_file = os.path.join(src_dir, '/'.join(sample[:3]), f'{sample}.{i}.{ft}')
+                dst_file = os.path.join(dst_dir, '/'.join(sample[:3]), f'{sample}.{i}.{ft}')
+                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                shutil.copy(src_file, dst_file)
+
+
 # %%
 
 
@@ -438,6 +531,9 @@ if __name__ == '__main__':
     # build_label_stat(bms_root)
     # main(bms_root, box_dir)
 
-    det_dataset_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train-det'
+    det_dataset_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/det-dataset/train-det'
+    det_sampled_dataset_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/det-dataset/train-sample-det'
     # bbox_json_breakdown(box_dir, bms_root)
-    main_v2(bms_root, det_dataset_dir)
+    # main_v2(bms_root, det_dataset_dir)
+    # count_bbox_type(det_dataset_dir)
+    select_by_cls('/home/ron/Projects/MolecularTranslation/type2sample.pickle', det_dataset_dir, det_sampled_dataset_dir)
