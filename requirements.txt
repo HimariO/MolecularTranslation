@@ -1,0 +1,5 @@
+fire
+torch
+loguru
+pytorch-lightning
+transformers
