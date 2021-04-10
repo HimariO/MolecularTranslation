@@ -1029,7 +1029,8 @@ if __name__ == "__main__":
     with logger.catch():
         pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
         config = BertConfig.from_pretrained(pretrain_dir)
-        bert = BertForImageCaptioning.from_pretrained(pretrain_dir, config=config)
+        # bert = BertForImageCaptioning.from_pretrained(pretrain_dir, config=config)
+        bert = BertForImageCaptioning(config)
 
         print(config)
         print(bert)
