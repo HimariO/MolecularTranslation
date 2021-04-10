@@ -133,3 +133,5 @@ dmypy.json
 *.pth
 .vscode
 *.pickle
+
+checkpoints

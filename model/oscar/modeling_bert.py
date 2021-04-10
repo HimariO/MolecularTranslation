@@ -510,7 +510,8 @@ class OscarForMultipleChoice(BertPreTrainedModel):
         if config.img_feature_dim > 0:
             self.bert = BertImgModel(config) # ImageBERT
         else:
-            self.bert = BertModel(config)  # original BERT
+            raise RuntimeError("NOPE")
+            # self.bert = BertModel(config)  # original BERT
 
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
