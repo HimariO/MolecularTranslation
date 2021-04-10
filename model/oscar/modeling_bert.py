@@ -7,13 +7,14 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss, MSELoss
-from transformers.modeling_bert import (BertEmbeddings, 
+from transformers.models.bert.modeling_bert import (BertEmbeddings, 
         BertSelfAttention, BertAttention, BertEncoder, BertLayer, 
         BertSelfOutput, BertIntermediate, BertOutput,
-        BertPooler, BertLayerNorm, BertPreTrainedModel,
+        BertPooler, BertPreTrainedModel,
 		BertOnlyMLMHead, BertLMPredictionHead,
-        BertConfig, BERT_PRETRAINED_MODEL_ARCHIVE_MAP,
+        BertConfig,
         load_tf_weights_in_bert)
+from transformers.models.bert.tokenization_bert import BertTokenizer
 from .modeling_utils import CaptionPreTrainedModel, ImgPreTrainedModel
 from .cbs import ConstrainedBeamSearch, select_best_beam_with_constraints
 
@@ -178,9 +179,9 @@ class BertImgModel(BertPreTrainedModel):
             self.img_embedding = nn.Linear(self.img_dim, self.config.hidden_size, bias=True)
             self.dropout = nn.Dropout(config.hidden_dropout_prob)
             if self.use_img_layernorm:
-                self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.img_layer_norm_eps)
+                self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.img_layer_norm_eps)
 
-        self.apply(self.init_weights)
+        self.init_weights()
 
     def _resize_token_embeddings(self, new_num_tokens):
         old_embeddings = self.embeddings.word_embeddings
@@ -299,7 +300,8 @@ class ImageBertForSequenceClassification(BertPreTrainedModel):
         if config.img_feature_dim > 0:
             self.bert = BertImgModel(config)
         else:
-            self.bert = BertModel(config)
+            raise RuntimeError('nope')
+            # self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         if hasattr(config, 'classifier'):
@@ -317,7 +319,7 @@ class ImageBertForSequenceClassification(BertPreTrainedModel):
                 )
         else:
             self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)  # original
-        self.apply(self.init_weights)
+        self.init_weights()
 
     def init_code_embedding(self, em):
         self.bert.code_embeddings.weight.data = em.clone()
@@ -364,7 +366,8 @@ class ImageBertForMultipleChoice(BertPreTrainedModel):
         if config.img_feature_dim > 0:
             self.bert = BertImgModel(config) # ImageBERT
         else:
-            self.bert = BertModel(config)  # original BERT
+            raise RuntimeError('nope')
+            # self.bert = BertModel(config)  # original BERT
 
         if hasattr(config, 'use_img_layernorm'):
             self.use_img_layernorm = config.use_img_layernorm
@@ -381,7 +384,7 @@ class ImageBertForMultipleChoice(BertPreTrainedModel):
                     self.classifier = nn.Sequential(
                     nn.Linear(config.num_choice*config.hidden_size, config.hidden_size*config.cls_hidden_scale),
                     nn.ReLU(),
-                    BertLayerNorm(config.hidden_size*config.cls_hidden_scale, eps=config.layer_norm_eps),
+                    nn.LayerNorm(config.hidden_size*config.cls_hidden_scale, eps=config.layer_norm_eps),
                     nn.Linear(config.hidden_size*config.cls_hidden_scale, self.config.num_labels)
                 )
                 else:
@@ -393,7 +396,7 @@ class ImageBertForMultipleChoice(BertPreTrainedModel):
         else:
             self.classifier = nn.Linear(config.num_choice*config.hidden_size, self.config.num_labels)  # original
 
-        self.apply(self.init_weights)
+        self.init_weights()
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None,
                 position_ids=None, head_mask=None, img_feats=None):
@@ -528,7 +531,7 @@ class OscarForMultipleChoice(BertPreTrainedModel):
         else:
             self.classifier = nn.Linear(config.hidden_size, config.num_labels)  # original
 
-        self.apply(self.init_weights)
+        self.init_weights()
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None,
                 position_ids=None, head_mask=None, img_feats=None):
@@ -613,7 +616,7 @@ class BertForImageCaptioning(CaptionPreTrainedModel):
         self.cls = BertOnlyMLMHead(config)
         self.loss = BertCaptioningLoss(config)
 
-        self.apply(self.init_weights)
+        self.init_weights()
         self.tie_weights()
 
     def tie_weights(self):
@@ -965,7 +968,7 @@ class BertImgForPreTraining(ImgPreTrainedModel):
 
     """
     config_class = BertConfig
-    pretrained_model_archive_map = BERT_PRETRAINED_MODEL_ARCHIVE_MAP
+    # pretrained_model_archive_map = BERT_PRETRAINED_MODEL_ARCHIVE_MAP
     load_tf_weights = load_tf_weights_in_bert
     base_model_prefix = "bert"
 
@@ -977,7 +980,7 @@ class BertImgForPreTraining(ImgPreTrainedModel):
         self.cls = BertPreTrainingHeads(config)
         self.num_seq_relations = config.num_contrast_classes if hasattr(config, "num_contrast_classes") else 2
 
-        self.apply(self.init_weights)
+        self.init_weights()
         self.tie_weights()
 
     def init_weights(self, module):
@@ -988,7 +991,7 @@ class BertImgForPreTraining(ImgPreTrainedModel):
             # cf https://github.com/pytorch/pytorch/pull/5617
             module.weight.data.normal_(mean=0.0,
                                        std=self.config.initializer_range)
-        elif isinstance(module, BertLayerNorm):
+        elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
         if isinstance(module, nn.Linear) and module.bias is not None:
@@ -1019,3 +1022,14 @@ class BertImgForPreTraining(ImgPreTrainedModel):
             outputs = (total_loss,) + outputs + (masked_lm_loss,)
 
         return outputs  # (loss), prediction_scores, seq_relationship_score, (hidden_states), (attentions)
+
+
+if __name__ == "__main__":
+    from loguru import logger
+    with logger.catch():
+        pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
+        config = BertConfig.from_pretrained(pretrain_dir)
+        bert = BertForImageCaptioning.from_pretrained(pretrain_dir, config=config)
+
+        print(config)
+        print(bert)

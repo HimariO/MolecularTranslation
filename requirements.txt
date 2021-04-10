@@ -3,3 +3,4 @@ torch
 loguru
 pytorch-lightning
 transformers
+anytree

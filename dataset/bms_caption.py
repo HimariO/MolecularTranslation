@@ -19,8 +19,8 @@ class BoxedBMS(Dataset):
         self.imgids = list(self.id2cap.keys())
     
     def get_samples(self):
-        pat = os.path.join(self.dataset_dir, '*', '*', '*', '*.png')
-        img_list = glob.glob(pat)
+        pat = os.path.join(self.dataset_dir, '**', '*.png')
+        img_list = glob.glob(pat, recursive=True)
         # det_json_list = [ip.replace(".png", ".json") for ip in img_list]
         id2imgdet = {
             os.path.basename(img).replace('.png', ''): (
