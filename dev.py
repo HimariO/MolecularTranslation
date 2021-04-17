@@ -2,9 +2,11 @@ import torch
 import torchvision as tv
 from torch.utils.data import DataLoader
 from loguru import logger
-from model.efficientnet.net import EfficientNet
 from tokenizers import Tokenizer
+from transformers.models.bert.modeling_bert import BertConfig
 
+from model.oscar.modeling_bert import BertForImageCaptioning
+from model.efficientnet.net import EfficientNet
 
 def test_visual_feat_extract():
     backbone = EfficientNet.from_pretrained(
@@ -40,8 +42,31 @@ def test_base_dataset():
     print(bbms[1])
     for batch_ndx, sample in enumerate(loader):
         print(sample)
-        break
+        return sample
 
 
-with logger.catch():
-    test_base_dataset()
+def test_img_cap_bert():
+    # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
+    pretrain_dir = "./config/bms_img_cap_bert/"
+    config = BertConfig.from_pretrained(pretrain_dir)
+    # bert = BertForImageCaptioning.from_pretrained(pretrain_dir, config=config)
+    bert = BertForImageCaptioning(config)
+    print(bert)
+
+    sample = test_base_dataset()
+    img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample
+    fake_img_feat = torch.normal(0, 1, size=[img.shape[0], atten_mask.shape[-1] - ids.shape[-1], 1540])
+    inputs = {
+        'input_ids': ids, 'attention_mask': atten_mask,
+        'token_type_ids': type_ids, 'img_feats': fake_img_feat, 
+        'masked_pos': mask_pos, 'masked_ids': mask_ids
+    }
+    bert.train()
+    output = bert(**inputs)
+    print([o.shape for o in output])
+
+
+with logger.catch(reraise=True):
+    # test_visual_feat_extract()
+    # test_base_dataset()
+    test_img_cap_bert()

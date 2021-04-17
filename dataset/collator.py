@@ -82,7 +82,7 @@ class EncodedBatchCollator:
                 F.pad(boxes, (1, 0, 0, 0), value=i)
             )
         batch_idx_boxes = torch.cat(batch_idx_boxes, dim=0)
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
 
         return (
             torch.stack(padded['img']),

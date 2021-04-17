@@ -27,6 +27,8 @@ class CaptionBertSelfAttention(BertSelfAttention):
     """
     def __init__(self, config):
         super(CaptionBertSelfAttention, self).__init__(config)
+        # HACK: hardcoded depreiated property
+        self.output_attentions = False
 
     def forward(self, hidden_states, attention_mask, head_mask=None,
             history_state=None):

@@ -1,9 +1,10 @@
 import os
 import glob
 import json
+import math
 import random
 import pickle
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from typing import Tuple, Union
 
 import cv2
@@ -125,11 +126,22 @@ class EncodedBBMS(BoxedBMS):
     max_masked_tokens = 16
 
     def __init__(self, dataset_dir: str, anno_csv: str, tokenizer: Tokenizer,
-                mask_prob=0.2, mlm=True,):
+                mask_prob=0.2, mlm=True, size_bining=False):
         super().__init__(dataset_dir, anno_csv)
         self.tokenizer = tokenizer
         self.mask_prob = mask_prob
         self.mlm = mlm
+    
+    def create_token_bins(self, bin_size=25):
+        id2len = {k: len(v) for k, v in self.id2cap.items()}
+        id2idx = {v: i for i, v in enumerate(self.imgids)}
+        bins = defaultdict(list)
+        for k in self.imgids:
+            l = id2len[k]
+            bin_id = math.ceil(l / bin_size)
+            bins[bin_id].append(id2idx[k])
+        logger.info(f"Created {len(bins)} bins with bin size {bin_size}")
+        return bins
     
     def random_mask_caption(self, encoding: Encoding) -> MaskedEncoding:
         tokens = encoding.tokens
@@ -158,11 +170,14 @@ class EncodedBBMS(BoxedBMS):
                 # 10% chance to remain the same (1-0.8-0.1)
                 pass
 
-        masked_pos[masked_idx] = 1 
+        masked_pos[masked_idx] = 1
         # pad masked tokens to the same length
-        if num_masked < self.max_masked_tokens:
-            masked_token = masked_token + (['[PAD]'] * (self.max_masked_tokens - num_masked))
+        # if num_masked < self.max_masked_tokens:
+        #     masked_token = masked_token + (['[PAD]'] * (self.max_masked_tokens - num_masked))
         masked_ids = [self.tokenizer.token_to_id(t) for t in masked_token]  # shape: (num_masked,)
+        if num_masked < self.max_masked_tokens:
+            # NOTE: correspone to model_bert:L654 padding check
+            masked_ids = masked_ids + ([0] * (self.max_masked_tokens - num_masked))
 
         return MaskedEncoding(
             ids=encoding.ids,
