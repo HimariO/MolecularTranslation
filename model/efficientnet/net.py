@@ -310,8 +310,8 @@ class EfficientNet(nn.Module):
         # Convolution layers
         x = self.extract_features(inputs)
         # Pooling and final linear layer
-        x = self._avg_pooling(x)
         if self._global_params.include_top:
+            x = self._avg_pooling(x)
             x = x.flatten(start_dim=1)
             x = self._dropout(x)
             x = self._fc(x)

@@ -451,7 +451,8 @@ def test(args, test_dataloader, model, tokenizer, predict_file):
                 world_size) + op.splitext(predict_file)[1]
 
     model.eval()
-    inputs_param = {'is_decode': True,
+    inputs_param = {
+        'is_decode': True,
         'do_sample': False,
         'bos_token_id': cls_token_id,
         'pad_token_id': pad_token_id,
