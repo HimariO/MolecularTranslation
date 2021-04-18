@@ -1,3 +1,4 @@
+from numpy.lib.function_base import iterable
 import torch
 import torchvision as tv
 from torch.utils.data import DataLoader
@@ -7,6 +8,8 @@ from transformers.models.bert.modeling_bert import BertConfig
 
 from model.oscar.modeling_bert import BertForImageCaptioning
 from model.efficientnet.net import EfficientNet
+from model.monocle import Monocle
+
 
 def test_visual_feat_extract():
     backbone = EfficientNet.from_pretrained(
@@ -29,7 +32,7 @@ def test_visual_feat_extract():
 
 def test_base_dataset():
     from dataset import bms_caption, collator
-    train_dir = "/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train"
+    train_dir = "/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/val"
     labels = "/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train_labels.csv"
 
     tk_model_file = "./checkpoints/bms_tokenizer.json"
@@ -41,21 +44,36 @@ def test_base_dataset():
     print(len(bbms))
     print(bbms[1])
     for batch_ndx, sample in enumerate(loader):
-        print(sample)
-        return sample
+        # print(sample)
+        pass
+        break
+    return loader
 
 
 def test_img_cap_bert():
+
+    def to_cuda(stuff):
+        if isinstance(stuff, torch.Tensor):
+            return stuff.cuda()
+        elif iterable(stuff):
+            return [to_cuda(s) for s in stuff]
+        else:
+            raise RuntimeError(f"{type(stuff)} !?")
+            
     # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
     pretrain_dir = "./config/bms_img_cap_bert/"
     config = BertConfig.from_pretrained(pretrain_dir)
     # bert = BertForImageCaptioning.from_pretrained(pretrain_dir, config=config)
     bert = BertForImageCaptioning(config)
-    print(bert)
+    bert.cuda()
+    # print(bert)
 
-    sample = test_base_dataset()
+    loader = test_base_dataset()
+    sample = next(iter(loader))
+    sample = (to_cuda(s) for s in sample)
     img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample
     fake_img_feat = torch.normal(0, 1, size=[img.shape[0], atten_mask.shape[-1] - ids.shape[-1], 1540])
+    fake_img_feat = fake_img_feat.cuda()
     inputs = {
         'input_ids': ids, 'attention_mask': atten_mask,
         'token_type_ids': type_ids, 'img_feats': fake_img_feat, 
@@ -63,10 +81,69 @@ def test_img_cap_bert():
     }
     bert.train()
     output = bert(**inputs)
-    print([o.shape for o in output])
+    loss = output[0]
+    loss.backward()
+    print([o.shape for o in output[:2]])
+
+
+def test_monocle():
+
+    def to_cuda(stuff):
+        if isinstance(stuff, torch.Tensor):
+            return stuff.cuda()
+        elif iterable(stuff):
+            return [to_cuda(s) for s in stuff]
+        else:
+            raise RuntimeError(f"{type(stuff)} !?")
+            
+    # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
+    pretrain_dir = "./config/bms_img_cap_bert/"
+    config = BertConfig.from_pretrained(pretrain_dir)
+    bert = Monocle(config)
+    bert.cuda()
+    # print(bert)
+
+    loader = test_base_dataset()
+    
+    # sample = next(iter(loader))
+    # sample = (to_cuda(s) for s in sample)
+    
+    # img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample
+    # inputs = {
+    #     'attention_mask': atten_mask,
+    #     'token_type_ids': type_ids,
+    #     'masked_pos': mask_pos,
+    #     'masked_ids': mask_ids,
+    #     'is_decode': False,
+    #     'is_training': True,
+    # }
+    # bert.train()
+    # output = bert(img, boxes, ids, **inputs)
+    # loss = output[0]
+    # loss.backward()
+    # print('-' * 100)
+    # print(output)
+    # print([o.shape for o in output[:2]])
+
+    for i, sample in enumerate(loader):
+        if i > 100: break
+        sample = (to_cuda(s) for s in sample)
+        img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample
+        inputs = {
+            'attention_mask': atten_mask,
+            'token_type_ids': type_ids,
+            'masked_pos': mask_pos,
+            'masked_ids': mask_ids,
+            'is_decode': False,
+            'is_training': True,
+        }
+        print(f'[{i}] seq_len: {ids.shape}, img size: {img.shape}')
+        output = bert(img, boxes, ids, **inputs)
+
 
 
 with logger.catch(reraise=True):
     # test_visual_feat_extract()
     # test_base_dataset()
-    test_img_cap_bert()
+    # test_img_cap_bert()
+    test_monocle()

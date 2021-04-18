@@ -635,6 +635,7 @@ class BertForImageCaptioning(CaptionPreTrainedModel):
         if is_decode:
             return self.generate(*args, **kwargs)
         else:
+            del kwargs['is_decode']
             return self.encode_forward(*args, **kwargs)
 
     def encode_forward(self, input_ids, img_feats, attention_mask, masked_pos, masked_ids=None, 

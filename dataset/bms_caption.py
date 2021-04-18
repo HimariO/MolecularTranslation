@@ -4,6 +4,7 @@ import json
 import math
 import random
 import pickle
+import hashlib
 from collections import defaultdict, namedtuple
 from typing import Tuple, Union
 
@@ -15,6 +16,7 @@ from loguru import logger
 from tokenizers import Tokenizer, Encoding
 from torch._C import dtype
 from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 
 
 MaskedEncoding = namedtuple(
@@ -51,6 +53,8 @@ class BoxedBMS(Dataset):
         self.anno_csv = anno_csv
         self.id2imgdet, self.id2cap = self.get_samples()
         self.imgids = list(self.id2imgdet.keys())
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                              std=[0.229, 0.224, 0.225])
     
     def get_samples(self):
         logger.info(f"[{self.__class__.__name__}] get_samples")
@@ -60,7 +64,10 @@ class BoxedBMS(Dataset):
         # det_json_list = [ip.replace(".png", ".json") for ip in img_list]
         
         os.makedirs(self.TMP_DIR, exist_ok=True)
-        cache_file = os.path.join(self.TMP_DIR, f"{len(img_list)}.pickle")
+        md5 = hashlib.md5()
+        md5.update(self.dataset_dir.encode("utf-8"))
+        dir_hash = str(md5.hexdigest())
+        cache_file = os.path.join(self.TMP_DIR, f"{dir_hash}_{len(img_list)}.pickle")
         if os.path.exists(cache_file):
             logger.info(f'Load cached dataset samples from: {cache_file}')
             with open(cache_file, mode='rb') as f:
@@ -74,7 +81,7 @@ class BoxedBMS(Dataset):
             anno_pd = pd.read_csv(self.anno_csv)
             id2cap = {row.image_id: row.InChI for _, row in anno_pd.iterrows()}
 
-            for old_cache in glob.glob(os.path.join(self.TMP_DIR, '*.pickle')):
+            for old_cache in glob.glob(os.path.join(self.TMP_DIR, f'{dir_hash}_*.pickle')):
                 logger.warning(f'Remove old samples cache: {old_cache}')
                 os.remove(old_cache)
             logger.info(f'Cache dataset samples to: {cache_file}')
@@ -86,8 +93,9 @@ class BoxedBMS(Dataset):
     def load_image(self, img_path):
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        np.transpose(img, [2, 0, 1])
-        return torch.tensor(img)
+        img = np.transpose(img, [2, 0, 1])
+        img_tensor = torch.tensor(img).float()
+        return self.normalize(img_tensor)
 
     def load_bbox(self, json_path, expand_ratio=1.5):
         with open(json_path, mode='r') as f:
@@ -195,17 +203,18 @@ class EncodedBBMS(BoxedBMS):
             boxes) -> VisAttenEncoding:
         atten_1d = encoding.attention_mask
         """
-        [CLS][CAPTION][SEP][BOX_FEAT][SEP]
+        [CLS][CAPTION][SEP] [BOX_FEAT]
         | atten_1d         | extened part|
         """
         a = len(atten_1d)
-        b = len(boxes) + 1
+        b = len(boxes)
         n = a + b
         attention_mask = torch.zeros([n, n], dtype=torch.long)
         # import pdb; pdb.set_trace()
         attention_mask[:a, :a] = torch.tril(torch.ones((a, a), dtype=torch.long))
         attention_mask[a:, a:] = 1
         attention_mask[:a, a:] = 1
+        # attention_mask = attention_mask.float()
         
         return VisAttenEncoding(
             ids=torch.tensor(encoding.ids),
