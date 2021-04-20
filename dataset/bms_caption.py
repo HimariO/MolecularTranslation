@@ -48,11 +48,12 @@ class BoxedBMS(Dataset):
 
     TMP_DIR = os.path.join(os.environ['HOME'], 'bms_tmp')
 
-    def __init__(self, dataset_dir, anno_csv) -> None:
+    def __init__(self, dataset_dir, anno_csv, max_img_size=720) -> None:
         self.dataset_dir = dataset_dir
         self.anno_csv = anno_csv
         self.id2imgdet, self.id2cap = self.get_samples()
         self.imgids = list(self.id2imgdet.keys())
+        self.max_img_size = max_img_size
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                               std=[0.229, 0.224, 0.225])
     
@@ -95,7 +96,8 @@ class BoxedBMS(Dataset):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = np.transpose(img, [2, 0, 1])
         img_tensor = torch.tensor(img).float()
-        return self.normalize(img_tensor)
+        return self.normalize(torch.clip(img_tensor, 0, 255) / 255)
+        # return torch.clip(img_tensor, 0, 255) / 255
 
     def load_bbox(self, json_path, expand_ratio=1.5):
         with open(json_path, mode='r') as f:
@@ -117,15 +119,32 @@ class BoxedBMS(Dataset):
             boxes *= wh
         return boxes
     
+    def cap_img_size(self, img, bbox):
+        h, w = img.shape[-2:]
+        if max(h, w) > self.max_img_size:
+            scale = self.max_img_size / max(h, w)
+            bbox *= scale
+            img = transforms.functional.resize(img, [int(h * scale), int(w * scale)])
+        return img, bbox
+    
     def __len__(self):
         return len(self.id2imgdet)
-
-    def __getitem__(self, i) -> Tuple[torch.Tensor, torch.Tensor, str]:
+    
+    def get_sample(self, i):
         key = self.imgids[i]
         caption = self.id2cap[key]
         img_path, bbox_json_path = self.id2imgdet[key]
         img = self.load_image(img_path)
         boxes = self.load_bbox(bbox_json_path)
+        img, boxes = self.cap_img_size(img, boxes)
+        return key, img, boxes, caption
+
+    def __getitem__(self, i) -> Tuple[torch.Tensor, torch.Tensor, str]:
+        boxes = []
+        while len(boxes) == 0:
+            key, img, boxes, caption = self.get_sample(i)
+            if len(boxes) == 0:
+                logger.warning(f"Get a zero box sample: {key}")
         return img, boxes, caption
 
 
@@ -134,7 +153,7 @@ class EncodedBBMS(BoxedBMS):
     max_masked_tokens = 16
 
     def __init__(self, dataset_dir: str, anno_csv: str, tokenizer: Tokenizer,
-                mask_prob=0.2, mlm=True, size_bining=False):
+                mask_prob=0.4, mlm=True, size_bining=False):
         super().__init__(dataset_dir, anno_csv)
         self.tokenizer = tokenizer
         self.mask_prob = mask_prob
@@ -151,16 +170,19 @@ class EncodedBBMS(BoxedBMS):
         logger.info(f"Created {len(bins)} bins with bin size {bin_size}")
         return bins
     
-    def random_mask_caption(self, encoding: Encoding) -> MaskedEncoding:
+    def random_mask_caption(self, encoding: Encoding, is_mlm=True) -> MaskedEncoding:
         tokens = encoding.tokens
-        seq_a_len = len(tokens)
+        seq_a_len = len(tokens)  # NOTE: accounting [SEP] token in between caption and img feat
         masked_pos = torch.zeros(seq_a_len, dtype=torch.int)
         # randomly mask words for prediction, ignore [CLS]
-        candidate_masked_idx = list(range(1, seq_a_len)) # only mask text_a
-        random.shuffle(candidate_masked_idx)
-        num_masked = max(round(self.mask_prob * seq_a_len), 1)
-        num_masked = min(num_masked, self.max_masked_tokens)
-        num_masked = int(num_masked)
+        candidate_masked_idx = list(range(1, seq_a_len - 1)) # only mask text_a
+        if is_mlm:
+            random.shuffle(candidate_masked_idx)
+            num_masked = max(round(self.mask_prob * seq_a_len), 1)
+            num_masked = min(num_masked, self.max_masked_tokens)
+            num_masked = int(num_masked)
+        else:
+            num_masked = len(candidate_masked_idx)
         masked_idx = candidate_masked_idx[:num_masked]
         masked_idx = sorted(masked_idx)
         masked_token = [tokens[i] for i in masked_idx]
@@ -229,7 +251,6 @@ class EncodedBBMS(BoxedBMS):
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor, Union[Encoding, ]]:
         img, boxes, caption = super().__getitem__(i)
         encoding = self.tokenizer.encode(f"[CLS]{caption}[SEP]")
-        if self.mlm:
-            encoding = self.random_mask_caption(encoding)
+        encoding = self.random_mask_caption(encoding, is_mlm=self.mlm)
         encoding = self.extend_visual_atten(encoding, boxes)
         return img, boxes, encoding

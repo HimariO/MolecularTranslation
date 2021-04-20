@@ -1,4 +1,5 @@
 import functools
+from os import pread
 from typing import List, Tuple
 
 import torch
@@ -87,13 +88,14 @@ class Monocle(pl.LightningModule):
         }
         outputs = self.forward(img, boxes, ids, **inputs)
         loss, logits = outputs[:2]
+        pred = F.softmax(logits, dim=-1)
 
         masked_ids = mask_ids[mask_ids != 0]
         batch_score = compute_score_with_logits(logits, masked_ids)
         batch_acc = torch.sum(batch_score.float()) / torch.sum(mask_pos)
 
         self.log('train_loss', loss)
-        self.log('train_acc_step', self.train_accuracy(logits, masked_ids))
+        self.log('train_acc_step', self.train_accuracy(pred, masked_ids), prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -108,18 +110,19 @@ class Monocle(pl.LightningModule):
         }
         outputs = self.forward(img, boxes, ids, **inputs)
         loss, logits = outputs[:2]
+        pred = F.softmax(logits, dim=-1)
 
         masked_ids = mask_ids[mask_ids != 0]
         # batch_score = compute_score_with_logits(logits, masked_ids)
         # batch_acc = torch.sum(batch_score.float()) / torch.sum(mask_pos)
 
-        self.val_accuracy(logits, masked_ids)
+        self.val_accuracy(pred, masked_ids)
         return {
             'predict': torch.max(logits, -1)[1].data
         }
     
     def validation_epoch_end(self, validation_step_outputs):
-        self.log('val_aucc_epoch', self.val_accuracy.compute())
+        self.log('val_aucc_epoch', self.val_accuracy.compute(), prog_bar=True)
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.0002)

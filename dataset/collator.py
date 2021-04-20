@@ -19,6 +19,7 @@ class EncodedBatchCollator:
             shapes['boxes'].append(boxes.shape)  # (n, 4)
             shapes['ids'].append(encoding.ids.shape)  # (m,)
             shapes['masked_pos'].append(encoding.masked_pos.shape)  # (m,)
+            shapes['masked_ids'].append(encoding.masked_pos.shape)  # (m,)
             # NOTE: we are not appling dynamic padding on masked_ids(masked toekn label)
             #   because its already been pad to fixed size and wont be feed into model(not affect inferece time)
             all_boxes.append(boxes)
@@ -50,7 +51,11 @@ class EncodedBatchCollator:
             mlm_pad_size = [0, mlm_pad[0]]
             masked_pos = F.pad(encoding.masked_pos, mlm_pad_size, value=0)
             padded['masked_pos'].append(masked_pos)
-            padded['masked_ids'].append(encoding.masked_ids)
+
+            mlm_pad = max_shape['masked_ids'] - np.asarray(encoding.masked_ids.shape)
+            mlm_pad_size = [0, mlm_pad[0]]
+            masked_ids = F.pad(encoding.masked_ids, mlm_pad_size, value=0)
+            padded['masked_ids'].append(masked_ids)
 
             """
             Pad 2D multi-modal attention mask

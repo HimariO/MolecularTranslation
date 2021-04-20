@@ -1,14 +1,17 @@
 from numpy.lib.function_base import iterable
 import torch
 import torchvision as tv
+import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from loguru import logger
 from tokenizers import Tokenizer
 from transformers.models.bert.modeling_bert import BertConfig
+from dataset import pl_bms
 
 from model.oscar.modeling_bert import BertForImageCaptioning
 from model.efficientnet.net import EfficientNet
 from model.monocle import Monocle
+from dataset.pl_bms import LitBBMS
 
 
 def test_visual_feat_extract():
@@ -137,13 +140,52 @@ def test_monocle():
             'is_decode': False,
             'is_training': True,
         }
-        print(f'[{i}] seq_len: {ids.shape}, img size: {img.shape}')
+        print(f'[{i}] seq_len: {ids.shape}, img size: {img.shape}, img_val_min_max: {img.min()}/{img.max()}')
         output = bert(img, boxes, ids, **inputs)
 
+
+def test_monocle_pl_trainer():
+            
+    # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
+    pretrain_dir = "./config/bms_img_cap_bert/"
+    config = BertConfig.from_pretrained(pretrain_dir)
+    bert = Monocle(config)
+
+    tk_model_file = "./checkpoints/bms_tokenizer.json"
+    tokenizer = Tokenizer.from_file(tk_model_file)
+    lit_dataset = LitBBMS(
+        '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train',
+        '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/val',
+        tokenizer,
+        '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train_labels.csv',
+        num_worker=2,
+        batch_size=12,
+    )
+    
+    trainer = pl.Trainer(
+        # fast_dev_run=True,
+        accumulate_grad_batches=1,
+        val_check_interval=1.0,
+        checkpoint_callback=True,
+        callbacks=[],
+        default_root_dir='checkpoints/dev',
+        gpus=1,
+        # num_nodes=2,
+        # distributed_backend='ddp',
+        precision=16,
+        # max_steps=1000,
+        # resume_from_checkpoint=resume_ckpt,
+        # num_sanity_val_steps=0,
+        # overfit_batches=32,
+        max_epochs=100,
+        limit_train_batches=5000,
+    )
+    trainer.fit(bert, datamodule=lit_dataset)
 
 
 with logger.catch(reraise=True):
     # test_visual_feat_extract()
     # test_base_dataset()
     # test_img_cap_bert()
-    test_monocle()
+    # test_monocle()
+    test_monocle_pl_trainer()
