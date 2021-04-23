@@ -140,17 +140,20 @@ class BoxedBMS(Dataset):
         return key, img, boxes, caption
 
     def __getitem__(self, i) -> Tuple[torch.Tensor, torch.Tensor, str]:
-        boxes = []
-        while len(boxes) == 0:
-            key, img, boxes, caption = self.get_sample(i)
-            if len(boxes) == 0:
+        boxes = None
+        while boxes is None:
+            try:
+                key, img, boxes, caption = self.get_sample(i)
+            except:
+                key = self.imgids[i]
                 logger.warning(f"Get a zero box sample: {key}")
-        return img, boxes, caption
+            i += 1
+        return key, img, boxes, caption
 
 
 class EncodedBBMS(BoxedBMS):
     
-    max_masked_tokens = 16
+    max_masked_tokens = 64
 
     def __init__(self, dataset_dir: str, anno_csv: str, tokenizer: Tokenizer,
                 mask_prob=0.4, mlm=True, size_bining=False):
@@ -169,20 +172,32 @@ class EncodedBBMS(BoxedBMS):
             bins[bin_id].append(id2idx[k])
         logger.info(f"Created {len(bins)} bins with bin size {bin_size}")
         return bins
-    
+            
     def random_mask_caption(self, encoding: Encoding, is_mlm=True) -> MaskedEncoding:
+
+        def random_continue_idx(a, b):
+            i = a
+            groups = []
+            while i < b:
+                group_size = random.randint(3, 8)
+                groups.append([i, min(b, i + group_size)])
+                i += group_size + 1
+            random.shuffle(groups)
+            groups = groups[:max(1, int(len(groups) * self.mask_prob))]
+            masked_ids = []
+            for group in groups:
+                masked_ids += list(range(group[0], group[1] + 1))
+            return masked_ids
+
         tokens = encoding.tokens
         seq_a_len = len(tokens)  # NOTE: accounting [SEP] token in between caption and img feat
         masked_pos = torch.zeros(seq_a_len, dtype=torch.int)
         # randomly mask words for prediction, ignore [CLS]
-        candidate_masked_idx = list(range(1, seq_a_len - 1)) # only mask text_a
         if is_mlm:
-            random.shuffle(candidate_masked_idx)
-            num_masked = max(round(self.mask_prob * seq_a_len), 1)
-            num_masked = min(num_masked, self.max_masked_tokens)
-            num_masked = int(num_masked)
+            candidate_masked_idx = random_continue_idx(1, seq_a_len)
         else:
-            num_masked = len(candidate_masked_idx)
+            candidate_masked_idx = list(range(1, seq_a_len)) # only mask text_a
+        num_masked = len(candidate_masked_idx)
         masked_idx = candidate_masked_idx[:num_masked]
         masked_idx = sorted(masked_idx)
         masked_token = [tokens[i] for i in masked_idx]
@@ -205,9 +220,9 @@ class EncodedBBMS(BoxedBMS):
         # if num_masked < self.max_masked_tokens:
         #     masked_token = masked_token + (['[PAD]'] * (self.max_masked_tokens - num_masked))
         masked_ids = [self.tokenizer.token_to_id(t) for t in masked_token]  # shape: (num_masked,)
-        if num_masked < self.max_masked_tokens:
-            # NOTE: correspone to model_bert:L654 padding check
-            masked_ids = masked_ids + ([0] * (self.max_masked_tokens - num_masked))
+        # if num_masked < self.max_masked_tokens:
+        #     # NOTE: correspone to model_bert:L654 padding check
+        #     masked_ids = masked_ids + ([0] * (self.max_masked_tokens - num_masked))
 
         return MaskedEncoding(
             ids=encoding.ids,
@@ -246,11 +261,11 @@ class EncodedBBMS(BoxedBMS):
             img_attention_mask=attention_mask[a:],
             offsets=encoding.offsets,
             masked_ids=torch.tensor(encoding.masked_ids) if hasattr(encoding, 'masked_ids') else None,
-            masked_pos=torch.tensor(encoding.masked_pos) if hasattr(encoding, 'masked_pos') else None)
+            masked_pos=encoding.masked_pos if hasattr(encoding, 'masked_pos') else None)
     
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor, Union[Encoding, ]]:
-        img, boxes, caption = super().__getitem__(i)
+        key, img, boxes, caption = super().__getitem__(i)
         encoding = self.tokenizer.encode(f"[CLS]{caption}[SEP]")
         encoding = self.random_mask_caption(encoding, is_mlm=self.mlm)
         encoding = self.extend_visual_atten(encoding, boxes)
-        return img, boxes, encoding
+        return key, img, boxes, encoding

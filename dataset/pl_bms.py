@@ -1,12 +1,17 @@
 import os
 
 import torch
+import numpy as np
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from tokenizers import Tokenizer
 
 from .bms_caption import EncodedBBMS
 from .collator import EncodedBatchCollator
+
+
+def worker_init_fn(worker_id):                                                          
+    np.random.seed(np.random.get_state()[1][0] + worker_id)
 
 
 class LitBBMS(pl.LightningDataModule):
@@ -27,12 +32,14 @@ class LitBBMS(pl.LightningDataModule):
             self.train_dir,
             self.anno_csv,
             self.tokenizer,
-            mlm=True)
+            mlm=False)
         loader = DataLoader(
             dataset,
+            shuffle=True,
             batch_size=self.batch_size,
             num_workers=self.num_worker,
-            collate_fn=EncodedBatchCollator())
+            collate_fn=EncodedBatchCollator(),
+            worker_init_fn=worker_init_fn)
         return loader
     
     def val_dataloader(self) -> EncodedBBMS:
@@ -43,7 +50,9 @@ class LitBBMS(pl.LightningDataModule):
             mlm=False)
         loader = DataLoader(
             dataset,
+            shuffle=False,
             batch_size=self.batch_size,
             num_workers=self.num_worker,
-            collate_fn=EncodedBatchCollator())
+            collate_fn=EncodedBatchCollator(),
+            worker_init_fn=worker_init_fn)
         return loader

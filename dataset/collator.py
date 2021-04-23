@@ -14,7 +14,7 @@ class EncodedBatchCollator:
         all_boxes = []
         shapes = defaultdict(list)
         for data in batch:
-            img, boxes, encoding = data
+            key, img, boxes, encoding = data
             shapes['img'].append(img.shape)  # (c, h, w)
             shapes['boxes'].append(boxes.shape)  # (n, 4)
             shapes['ids'].append(encoding.ids.shape)  # (m,)
@@ -28,8 +28,11 @@ class EncodedBatchCollator:
             k: np.asarray(v).max(axis=0)
             for k, v in shapes.items()}
         padded = defaultdict(list)
+        sample_keys = []
         for data in batch:
-            img, boxes, encoding = data
+            key, img, boxes, encoding = data
+            sample_keys.append(key)
+
             img_pad = max_shape['img'] - np.asarray(img.shape)
             pad_size = [[0, d] for d in reversed(img_pad)]
             pad_size = functools.reduce(lambda a, b: a + b, pad_size)
@@ -90,6 +93,7 @@ class EncodedBatchCollator:
         # import pdb; pdb.set_trace()
 
         return (
+            sample_keys,
             torch.stack(padded['img']),
             all_boxes,
             torch.stack(padded['ids']),

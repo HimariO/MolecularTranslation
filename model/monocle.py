@@ -7,21 +7,25 @@ import torchvision as tv
 import pytorch_lightning as pl
 from torch import nn
 from torch.nn import functional as F
+from tokenizers import Tokenizer
 
 from .oscar.modeling_bert import BertForImageCaptioning, BertConfig
 from .oscar.mlm import compute_score_with_logits
 from .efficientnet.net import EfficientNet
 
 
+PAD_TOKEN_ID = 3
+
 class Monocle(pl.LightningModule):
 
-    def __init__(self, bert_config: BertConfig, ):
+    def __init__(self, bert_config: BertConfig, tokenizer: Tokenizer=None):
         super().__init__()
         self.backbone = EfficientNet.from_pretrained(
             'efficientnet-b3',
             in_channels=3,
             include_top=False)
         self.bert = BertForImageCaptioning(bert_config)
+        self.tokenizer = tokenizer
 
         self.train_accuracy = pl.metrics.classification.Accuracy()
         self.val_accuracy = pl.metrics.classification.Accuracy()
@@ -74,10 +78,15 @@ class Monocle(pl.LightningModule):
             'masked_pos': masked_pos, 'masked_ids': masked_ids,
             "is_decode": is_decode, "is_training": is_training,
         }
-        return self.bert(**inputs)
+        output = self.bert(**inputs)
+        if is_training:
+            logits = output[1]
+            if torch.isnan(logits).any():
+                import pdb; pdb.set_trace()
+        return output
     
     def training_step(self, batch, batch_idx):
-        img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = batch
+        keys, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = batch
         inputs = {
             'attention_mask': atten_mask,
             'token_type_ids': type_ids,
@@ -96,27 +105,51 @@ class Monocle(pl.LightningModule):
 
         self.log('train_loss', loss)
         self.log('train_acc_step', self.train_accuracy(pred, masked_ids), prog_bar=True)
+        # self.log('train_acc_step', batch_acc, prog_bar=True)
+        if batch_idx % 100 == 0:
+            pred_ids = pred.argmax(dim=-1)
+            tensorboard = self.logger.experiment
+            tensorboard.add_histogram('train_batch_pred', pred_ids, global_step=batch_idx)
+        
+        # try:
+        #     self.train_accuracy(pred, masked_ids)
+        # except:
+        #     import pdb; pdb.set_trace()
+        # if batch_acc > 0.999:
+        #     import pdb; pdb.set_trace()
         return loss
 
     def validation_step(self, batch, batch_idx):
-        img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = batch
+        keys, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = batch
         inputs = {
             'attention_mask': atten_mask,
             'token_type_ids': type_ids,
             'masked_pos': mask_pos,
             'masked_ids': mask_ids,
             'is_decode': False,
-            'is_training': True,
+            'is_training': False,
         }
         outputs = self.forward(img, boxes, ids, **inputs)
-        loss, logits = outputs[:2]
+        logits = outputs[0]
         pred = F.softmax(logits, dim=-1)
 
         masked_ids = mask_ids[mask_ids != 0]
         # batch_score = compute_score_with_logits(logits, masked_ids)
         # batch_acc = torch.sum(batch_score.float()) / torch.sum(mask_pos)
+        if not self.tokenizer is None and batch_idx % 50 == 0:
+            pred_ids = pred.argmax(dim=-1)
+            pred_ids = pred_ids.cpu().numpy().tolist()
+            pred_ids = [
+                [p for p in pred if p != PAD_TOKEN_ID]
+                for pred in pred_ids
+            ]
+            pred_strs = self.tokenizer.decode_batch(pred_ids)
+            log_str = "\n\n".join([f"[{j}] {s}" for j, s in enumerate(pred_strs)])
 
-        self.val_accuracy(pred, masked_ids)
+            tensorboard = self.logger.experiment
+            tensorboard.add_text('train_batch_pred_txt', log_str, global_step=batch_idx)
+
+        self.val_accuracy(pred[mask_pos != 0], masked_ids)
         return {
             'predict': torch.max(logits, -1)[1].data
         }
@@ -125,4 +158,4 @@ class Monocle(pl.LightningModule):
         self.log('val_aucc_epoch', self.val_accuracy.compute(), prog_bar=True)
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=0.0002)
+        return torch.optim.Adam(self.parameters(), lr=0.00001)

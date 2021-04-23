@@ -597,6 +597,9 @@ class BertCaptioningLoss(nn.Module):
         log_prb = self.log_soft(logits)
         loss = self.kl(log_prb, one_hot).sum(1)
 
+        # if torch.isnan(loss).any():
+        #     import pdb; pdb.set_trace()
+
         if self.drop_worst_ratio > 0 and self.iter > self.drop_worst_after:
             loss, _ = torch.topk(loss,
                     k=int(loss.shape[0] * (1-self.drop_worst_ratio)),
