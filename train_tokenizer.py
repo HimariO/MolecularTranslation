@@ -5,7 +5,7 @@ from pathlib import Path
 import tokenizers
 
 from tokenizers.trainers import BpeTrainer
-from tokenizers.implementations import ByteLevelBPETokenizer
+from tokenizers.implementations import ByteLevelBPETokenizer, BertWordPieceTokenizer, SentencePieceUnigramTokenizer
 from tokenizers import Tokenizer
 
 
@@ -27,12 +27,13 @@ def train(txt_dir):
     print(paths)
 
     # Initialize a tokenizer
+    # tokenizer = BertWordPieceTokenizer()
     tokenizer = ByteLevelBPETokenizer()
 
     # Customize training
     tokenizer.train(
         files=paths,
-        vocab_size=52_000,
+        vocab_size=52000,
         min_frequency=2,
         special_tokens=[
             "[UNK]",

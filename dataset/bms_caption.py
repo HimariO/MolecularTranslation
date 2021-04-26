@@ -22,6 +22,7 @@ from torchvision import transforms
 MaskedEncoding = namedtuple(
     "MaskedEncoding",
     ["ids",
+    "src_ids",
     "type_ids",
     "tokens",
     "offsets",
@@ -36,6 +37,7 @@ len(attention_mask) == len(tokens) + len(bboxes) == len(token_ids) + len(img_fea
 VisAttenEncoding = namedtuple(
     "MaskedEncoding",
     ["ids",
+    "src_ids",
     "type_ids",
     "tokens",
     "offsets",
@@ -186,7 +188,7 @@ class EncodedBBMS(BoxedBMS):
             groups = groups[:max(1, int(len(groups) * self.mask_prob))]
             masked_ids = []
             for group in groups:
-                masked_ids += list(range(group[0], group[1] + 1))
+                masked_ids += list(range(group[0], max(b, group[1] + 1)))
             return masked_ids
 
         tokens = encoding.tokens
@@ -204,11 +206,11 @@ class EncodedBBMS(BoxedBMS):
         for pos in masked_idx:
             if random.random() <= 0.8:
                 # 80% chance to be a ['MASK'] token
-                tokens[pos] = self.tokenizer.token_to_id('[MASK]')
+                tokens[pos] = '[MASK]'
             elif random.random() <= 0.5:
                 # 10% chance to be a random word ((1-0.8)*0.5)
                 from random import randint
-                i = randint(0, self.tokenizer.get_vocab_size())
+                i = randint(0, self.tokenizer.get_vocab_size() - 1)
                 # self.tokenizer._convert_id_to_token(i)
                 tokens[pos] = self.tokenizer.id_to_token(i)
             else:
@@ -223,9 +225,11 @@ class EncodedBBMS(BoxedBMS):
         # if num_masked < self.max_masked_tokens:
         #     # NOTE: correspone to model_bert:L654 padding check
         #     masked_ids = masked_ids + ([0] * (self.max_masked_tokens - num_masked))
+        input_ids = [self.tokenizer.token_to_id(t) for t in tokens]
 
         return MaskedEncoding(
-            ids=encoding.ids,
+            ids=input_ids,
+            src_ids=encoding.ids,
             tokens=encoding.tokens,
             type_ids=encoding.type_ids,
             attention_mask=encoding.attention_mask,
@@ -236,7 +240,7 @@ class EncodedBBMS(BoxedBMS):
     
     def extend_visual_atten(
             self,
-            encoding: Union[Encoding, MaskedEncoding],
+            encoding: MaskedEncoding,
             boxes) -> VisAttenEncoding:
         atten_1d = encoding.attention_mask
         """
@@ -255,6 +259,7 @@ class EncodedBBMS(BoxedBMS):
         
         return VisAttenEncoding(
             ids=torch.tensor(encoding.ids),
+            src_ids=torch.tensor(encoding.src_ids),
             tokens=encoding.tokens,
             type_ids=torch.tensor(encoding.type_ids),
             token_attention_mask=attention_mask[:a],

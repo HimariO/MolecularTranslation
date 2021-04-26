@@ -158,4 +158,4 @@ class Monocle(pl.LightningModule):
         self.log('val_aucc_epoch', self.val_accuracy.compute(), prog_bar=True)
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=0.00001)
+        return torch.optim.Adam(self.parameters(), lr=0.0001)
