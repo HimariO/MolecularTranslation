@@ -1,8 +1,12 @@
 import os
 import re
 import copy
+import random
+import itertools
+import functools
 from pathlib import Path
 from io import BytesIO
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -21,6 +25,7 @@ import rdkit
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
 from rdkit.Chem.Draw import MolDrawOptions
+from torch._C import Value
 
 
 def one_in(n):
@@ -252,3 +257,185 @@ def create_dataset(bms_root, output_dir):
         Image.fromarray(img).save(output_path)
         
 
+class InChiSyth:
+
+    ATOM_CHARGE = {
+        "N": -3,
+        "O": -2,
+        "S": -2,
+        "F": -1,
+        "Cl": -1,
+        "I": -1,
+        "Br": -1,
+        "P": -3,
+        "Si": -4,
+        "H": -1,
+        "B": -3,
+        "C": -4,
+    }
+
+    RARE_ATOMS = [
+        'Cl3',
+        'O-1',
+        'O1',
+        'Si-1',
+        'C-1',
+        'C1',
+        'B1',
+        'N1',
+        'N-1',
+        'Si1',
+        'F1',
+        'P1',
+        'B-1',
+        'I3',
+        'S-1',
+        'S1',
+        'P-1',
+        'Br1',
+        'H1',
+        'Cl2',
+        'Br2',
+        'Cl1',
+        'I1',
+        'I2',
+    ]
+
+    def __init__(self, atom_maps: Dict[str, float], num_atom_range=[10, 30], sparsity_range=[0.1, 0.3]):
+        """
+        atom_maps: element to sample weight
+        sparsity_range: range of how dense atoms is connected together with random bonds
+        """
+        atoms = list(atom_maps.keys())
+        self.num_atom_range = num_atom_range
+        self.sparsity_range = sparsity_range
+
+        self.atom_metas = {a: m for a, m in zip(atoms, self.parse_atom_name(atoms))}
+        self.atom_maps = atom_maps
+        self.bond_maps = {
+            Chem.rdchem.BondType.SINGLE: 0.8,
+            Chem.rdchem.BondType.DOUBLE: 0.1,
+            Chem.rdchem.BondType.TRIPLE: 0.1,
+        }
+
+    def parse_atom_name(self, atoms: List[str]):
+        pattern = re.compile(r'([a-zA-Z]{1,3})(\-?\d+)?')
+        res = []
+        for atom in atoms:
+            m = re.match(pattern, atom)
+            assert m is not None
+            ele = m.group(1)
+            charge = None if m.group(2) is None else int(m.group(2))
+            res.append({
+                "type": ele, 
+                "charge": charge
+            })
+        return res
+    
+    def random_one(self):
+        synth_mol = Chem.RWMol()
+        N = random.randint(*self.num_atom_range)
+        sampled = np.random.choice(
+                    list(self.atom_maps.keys()),
+                    size=[N],
+                    p=list(self.atom_maps.values()))
+        for atom in sampled:
+            meta = self.atom_metas[atom]
+            a = Chem.Atom(meta['type'])
+            a.SetFormalCharge(meta['charge'])
+            aid = synth_mol.AddAtom(a)
+
+        edge_thred = np.random.uniform(size=[], low=self.sparsity_range[0], high=self.sparsity_range[1])
+        adj_mtx = np.random.uniform(size=[N, N], low=0, high=1) < edge_thred
+        adj_mtx = np.triu(adj_mtx, k=1)
+        adj_mask = 1 - np.triu(np.ones_like(adj_mtx), k=N//4)
+        print(adj_mask)
+        
+        adj_mtx = adj_mtx * adj_mask
+        print(adj_mtx.astype(np.int32))
+
+        bond_list = list(self.bond_maps.keys())
+        bond_idx = list(range(len(bond_list)))
+        for i, j in itertools.product(range(N), range(N)):
+            if adj_mtx[i, j]:
+                bond = np.random.choice(
+                    bond_idx,
+                    size=[1],
+                    p=list(self.bond_maps.values())
+                )[0]
+                bond = bond_list[bond]
+                print(bond)
+                synth_mol.AddBond(i, j, bond)
+        del_idx = []
+        for i, adj_sum in adj_mtx.sum(-1):
+            if adj_sum < 1:
+                del_idx.append(i)
+        for i in del_idx[::-1]:
+            synth_mol.RemoveAtom(i)
+        return synth_mol
+    
+    def random_swap(self, inchi: str):
+        src_mol = Chem.MolFromInchi(inchi)
+        synth_mol = Chem.RWMol()
+        atoms_residual_charge = []
+        for ai, atom in enumerate(src_mol.GetAtoms()):
+            s = atom.GetSymbol()
+            c = atom.GetFormalCharge()
+            
+            nc = 0
+            contain_aromatic = False
+            for bond in atom.GetBonds():
+                btype = bond.GetBondType()
+                if btype == Chem.rdchem.BondType.SINGLE:
+                    nc += 1
+                elif btype == Chem.rdchem.BondType.DOUBLE:
+                    nc += 2
+                elif btype == Chem.rdchem.BondType.AROMATIC:
+                    nc += 2
+                    contain_aromatic = True
+                elif btype == Chem.rdchem.BondType.TRIPLE:
+                    nc += 3
+                else:
+                    raise ValueError(f"Unknown bond type: {btype}")
+            
+            if f"{s}{c}" != 'C0' and not contain_aromatic and nc <= 3:
+                meta = random.choice(list(self.atom_metas.values()))
+                a = Chem.Atom(meta['type'])
+                a.SetFormalCharge(meta['charge'])
+                synth_mol.AddAtom(a)
+
+                nc -= meta['charge']
+                nc += self.ATOM_CHARGE[meta['type']]
+                atoms_residual_charge.append(nc)
+                # print(f"{s}{c} -> {meta['type']}{meta['charge']}, nc:{nc}")
+            else:
+                synth_mol.AddAtom(atom)
+                atoms_residual_charge.append(0)
+        
+        for i, rc in enumerate(atoms_residual_charge):
+            if rc != 0:
+                rc = abs(rc)
+                while rc > 0:
+                    a = Chem.Atom("C")
+                    a.SetFormalCharge(0)
+                    aid = synth_mol.AddAtom(a)
+                    synth_mol.AddBond(
+                        i,
+                        aid,
+                        Chem.rdchem.BondType.SINGLE,)
+                    rc -= 1
+        
+        bond_list = list(self.bond_maps.keys())
+        bond_idx = list(range(len(bond_list)))
+        for bond in src_mol.GetBonds():
+            rand_bond = np.random.choice(
+                    bond_idx,
+                    size=[1],
+                    p=list(self.bond_maps.values())
+                )[0]
+            # rand_bond = bond_list[bond]
+            synth_mol.AddBond(
+                bond.GetBeginAtomIdx(),
+                bond.GetEndAtomIdx(),
+                bond.GetBondType(),)
+        return synth_mol

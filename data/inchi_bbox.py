@@ -64,7 +64,7 @@ def _get_rand_svg_doc(mol, render_size=300):
     options.minFontSize = 12
     options.maxFontSize = options.minFontSize + int(np.round(np.random.uniform(0, 12)))
     
-    d.SetFontSize(100)
+    d.SetFontSize(40)
     d.SetDrawOptions(options)
     d.DrawMolecule(mol)
     d.AddMoleculeMetadata(dm)
@@ -150,16 +150,32 @@ def create_unique_ins_labels(data, base_path='.'):
     output_counts_path = base_path + '/unique_atom_smiles_counts.json'
     output_unique_atoms = base_path + '/unique_atoms_per_molecule.csv'
     output_mol_rarity = base_path + '/mol_rarity_train.csv'
-
+    
+    assert not os.path.exists(output_counts_path)
+    assert not os.path.exists(output_unique_atoms)
+    assert not os.path.exists(output_mol_rarity)
     assert type(inchi_list) == list, 'Input Inchi data type must be a LIST'
 
-    n_jobs = max(mp.cpu_count() - 2, 1)
+    n_jobs = max(mp.cpu_count() - 4, 1)
 
     # get unique atom-smiles in each compound and count for sampling later.
-    result = pqdm(inchi_list,
-                  _get_unique_atom_inchi_and_rarity,
-                  n_jobs=n_jobs, 
-                  desc='Calculating unique atom-smiles and rarity')
+
+    with mp.Pool(n_jobs) as pool:
+        if len(inchi_list) > 1_000_000:
+            result = []
+            for ai, a in enumerate(range(0, len(inchi_list), 1_000_000)):
+                sub_list = inchi_list[a: a + 1_000_000]
+                sub_res = pqdm(
+                    sub_list,
+                    _get_unique_atom_inchi_and_rarity,
+                    n_jobs=n_jobs, 
+                    desc=f'Calculating unique atom-smiles and rarity - {ai}')
+                result += sub_res
+        else:
+            result = pqdm(inchi_list,
+                        _get_unique_atom_inchi_and_rarity,
+                        n_jobs=n_jobs, 
+                        desc='Calculating unique atom-smiles and rarity')
     result, sample_weights = list(map(list, zip(*result)))
     counts = Counter(x for xs in result for x in xs)
 
@@ -197,7 +213,7 @@ def get_bbox(inchi, unique_labels, atom_margin=12, bond_margin=10, rand_svg=Fals
     for k, v in unique_labels.items():
         labels[k] = v
 
-    mol = Chem.MolFromInchi(inchi)
+    mol = Chem.MolFromInchi(inchi) if isinstance(inchi, str) else inchi
     if rand_svg:
         doc, svg = _get_rand_svg_doc(mol)
     else:
@@ -291,55 +307,6 @@ def build_label_stat(bms_root):
         create_unique_ins_labels(train_df, base_path=bms_root)
 
 
-def get_bbox_shard(args):
-    inchi_df, unique_atom = args
-    annotations = []
-    for i, row in inchi_df.iterrows():
-        # with logger.catch():
-        try:
-            boxes_anno, _ = get_bbox(row.InChI, unique_atom)
-            annotations.append({
-                'image_id': row.image_id,
-                'boxes': boxes_anno,
-            })
-        except IndexError:
-            print(i, row.InChI, 'index error')
-    return annotations
-
-def main(bms_root, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
-    unique_atom_csv = os.path.join(bms_root, 'unique_atom_smiles_counts.json')
-    train_df = pd.read_csv(os.path.join(bms_root, 'train_labels.csv'))
-    with open(unique_atom_csv, 'r') as f:
-        unique_atom = json.load(f)
-        # rand_inchi = train_df.iloc[5].InChI
-        # get_bbox('InChI=1S/C21H30O4/c1-12(22)25-14-6-8-20(2)13(10-14)11-17(23)19-15-4-5-18(24)21(15,3)9-7-16(19)20/h13-16,19H,4-11H2,1-3H3/t13-,14+,15+,16-,19-,20+,21+/m1/s1', unique_atom)
-        # get_bbox('InChI=1S/C24H50OSi/c1-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-23-25-26(5,6)24(2,3)4/h14-15H,7-13,16-23H2,1-6H3/b15-14-/i13D2,14D,15D', unique_atom)
-        # get_bbox('InChI=1S/C18H22O4/c19-11-15(7-13-3-1-5-17(21)9-13)16(12-20)8-14-4-2-6-18(22)10-14/h1-6,9-10,15-16,19-22H,7-8,11-12H2/t15-,16-/m0/s1/i3D,4D,5D,6D,9D,10D', unique_atom)
-        # get_bbox(rand_inchi, unique_atom)
-    # train_df = train_df.iloc[:16000]
-    n_worker = 8
-    n_split = n_worker * 20
-    J = 20
-    assert len(train_df) >= n_worker * n_split * J
-    args = [(train_df.iloc[i::n_split], unique_atom) for i in range(n_split)]
-    jargs = [args[i::J] for i in range(J)]
-    
-    with mp.Pool(n_worker) as pool:
-        # results = pool.map(get_bbox_shard, args)
-        for j in range(J):
-            results = pqdm(
-                jargs[j],
-                get_bbox_shard,
-                n_jobs=n_worker, 
-                desc=f'Calculating boxes - batch {j}')
-            for i, result in enumerate(results):
-                output_file = os.path.join(output_dir, f"bms_bbox.{j}.{i}.json")
-                print(colored(f'Save', color='blue'), f' {output_file}')
-                with open(output_file, mode='w') as f:
-                    json.dump(result, f)
-
-
 def generate_img_and_box(args):
     inchi_df, unique_atom, name2img, output_dir = args
     for i, row in inchi_df.iterrows():
@@ -368,7 +335,7 @@ def generate_img_and_box(args):
                 json.dump(det_anno, f)
 
 
-def main_v2(bms_root, output_dir):
+def build_bms_det_dataset(bms_root, output_dir):
     from rdkit import RDLogger
     RDLogger.DisableLog('rdApp.*')
     os.makedirs(output_dir, exist_ok=True)
@@ -392,6 +359,40 @@ def main_v2(bms_root, output_dir):
 
     n_worker = 12
     n_split = n_worker * 10
+    J = 10
+    assert len(train_df) >= n_worker * n_split * J, f"{len(train_df)} >= {n_worker * n_split * J}"
+    args = [
+        (train_df.iloc[i::n_split], unique_atom, name2img, output_dir)
+        for i in range(n_split)
+    ]
+    jargs = [args[i::J] for i in range(J)]
+
+    with mp.Pool(n_worker) as pool:
+        for j in range(J):
+            pqdm(
+                jargs[j],
+                generate_img_and_box,
+                n_jobs=n_worker, 
+                desc=f'Calculating boxes - batch {j}')
+            # pool.map(generate_img_and_box, jargs[j])
+
+
+def build_extra_det_dataset(train_label, unique_atom_csv, output_dir):
+    from rdkit import RDLogger
+    RDLogger.DisableLog('rdApp.*')
+    os.makedirs(output_dir, exist_ok=True)
+    
+    train_df = pd.read_csv(train_label)
+    # train_df = train_df.iloc[:1600]
+    with open(unique_atom_csv, 'r') as f:
+        unique_atom = json.load(f)
+    name2img = {
+        row.image_id: os.path.join('/'.join(row.image_id[:3]), f"{row.image_id}.png")
+        for _, row in train_df.iterrows()
+    }
+
+    n_worker = 4
+    n_split = n_worker * 4
     J = 10
     assert len(train_df) >= n_worker * n_split * J, f"{len(train_df)} >= {n_worker * n_split * J}"
     args = [
@@ -495,7 +496,7 @@ def count_bbox_type(det_dataset):
     print(type_cnt)
 
 
-def select_by_cls(type2same_pickle, src_dir, dst_dir):
+def select_det_by_cls(type2same_pickle, src_dir, dst_dir):
     with open(type2same_pickle, 'rb') as f:
         type2sample = pickle.load(f)
     type_sam_pair = [(k, v) for k, v in type2sample.items()]
@@ -522,18 +523,84 @@ def select_by_cls(type2same_pickle, src_dir, dst_dir):
                 shutil.copy(src_file, dst_file)
 
 
+def filter_label_by_atom(labels_dir):
+    cnts = os.path.join(labels_dir, 'unique_atom_smiles_counts.json')
+    sample_atom = os.path.join(labels_dir, 'unique_atoms_per_molecule.csv')
+    with open(cnts, mode='r') as f:
+        cnts = json.load(f)
+    sample_atom = pd.read_csv(sample_atom)
+    white_list_atoms = [k for k, v in cnts.items() if v <= 1000]
+    # print(white_list_atoms)
+    # import pdb; pdb.set_trace()
+    indices = []
+    for i, row in sample_atom.iterrows():
+        if i % 1000 == 0:
+            print(f"{i}/{len(sample_atom)}")
+        check = [a in row.unique_atoms for a in white_list_atoms]
+        check = any(check)
+        if check:
+            indices.append(i)
+    rare_samples = sample_atom.iloc[indices]
+    rare_samples.to_csv(os.path.join(labels_dir, 'rare_molecule.csv'))
+
+
+def gather_extra_samples(dir_path, output_file):
+    sample_csv_list = glob.glob(os.path.join(dir_path, '*/rare_molecule.csv'))
+    sample_csv_list = [pd.read_csv(c) for c in sample_csv_list]
+    sample_csv = pd.concat(sample_csv_list, axis=0)
+    img_idx = [f"e{i:08}" for i in range(len(sample_csv))]
+    sample_csv = pd.DataFrame({
+        'image_id': img_idx,
+        'InChI': sample_csv.Inchi
+    })
+    sample_csv.to_csv(output_file)
+
+
+
 # %%
 
 
 if __name__ == '__main__':
-    bms_root = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation'
-    box_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train-bbox'
-    # build_label_stat(bms_root)
-    # main(bms_root, box_dir)
 
-    det_dataset_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/det-dataset/train-det'
-    det_sampled_dataset_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/det-dataset/train-sample-det'
-    # bbox_json_breakdown(box_dir, bms_root)
-    # main_v2(bms_root, det_dataset_dir)
-    # count_bbox_type(det_dataset_dir)
-    select_by_cls('/home/ron/Projects/MolecularTranslation/type2sample.pickle', det_dataset_dir, det_sampled_dataset_dir)
+    def standar_dataset_preprocess():
+        bms_root = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation'
+        box_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train-bbox'
+        build_label_stat(bms_root)
+
+    def build_standar_dataset_bbox():
+        det_dataset_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/det-dataset/train-det'
+        det_sampled_dataset_dir = '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/det-dataset/train-sample-det'
+        # bbox_json_breakdown(box_dir, bms_root)
+        # build_bms_det_dataset(bms_root, det_dataset_dir)
+        # count_bbox_type(det_dataset_dir)
+        select_det_by_cls('/home/ron/Projects/MolecularTranslation/type2sample.pickle', det_dataset_dir, det_sampled_dataset_dir)
+    
+    def extra_inchi_data():
+        extra_csv = "/home/ron/Downloads/bms-molecular-translation/extra/extra_inchis_id.csv"
+        extra_sample_pd = pd.read_csv(extra_csv)
+        extra_dir = os.path.dirname(extra_csv)
+        
+        N = 1_000_000
+        for ai, a in enumerate(range(0, len(extra_sample_pd), N)):
+            sub_dir = os.path.join(extra_dir, str(ai))
+            os.makedirs(sub_dir, exist_ok=True)
+            create_unique_ins_labels(extra_sample_pd.iloc[a: a+N], base_path=sub_dir)
+    
+    def sample_extra_inchi():
+        sample_sub_dirs = [
+            f for f in glob.glob("/home/ron/Downloads/bms-molecular-translation/extra/*")
+            if os.path.isdir(f)]
+        for dir in sample_sub_dirs:
+            print(dir)
+            filter_label_by_atom(dir)
+
+    # extra_inchi_data()
+    # sample_extra_inchi()
+    gather_extra_samples(
+        "/home/ron/Downloads/bms-molecular-translation/extra/",
+        "/home/ron/Downloads/bms-molecular-translation/extra/rare_extra_inchi.csv")
+    build_extra_det_dataset(
+        '/home/ron/Downloads/bms-molecular-translation/extra/rare_extra_inchi.csv',
+        '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/unique_atom_smiles_counts.json',
+        '/home/ron/Downloads/bms-molecular-translation/extra/det-dataset',
+    )
