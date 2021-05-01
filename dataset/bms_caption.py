@@ -50,12 +50,13 @@ class BoxedBMS(Dataset):
 
     TMP_DIR = os.path.join(os.environ['HOME'], 'bms_tmp')
 
-    def __init__(self, dataset_dir, anno_csv, max_img_size=720) -> None:
+    def __init__(self, dataset_dir, anno_csv, max_img_size=720, max_cap_len=None) -> None:
         self.dataset_dir = dataset_dir
         self.anno_csv = anno_csv
         self.id2imgdet, self.id2cap = self.get_samples()
         self.imgids = list(self.id2imgdet.keys())
         self.max_img_size = max_img_size
+        self.max_cap_len = max_cap_len
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                               std=[0.229, 0.224, 0.225])
     
@@ -158,8 +159,8 @@ class EncodedBBMS(BoxedBMS):
     max_masked_tokens = 64
 
     def __init__(self, dataset_dir: str, anno_csv: str, tokenizer: Tokenizer,
-                mask_prob=0.4, mlm=True, size_bining=False):
-        super().__init__(dataset_dir, anno_csv)
+                mask_prob=0.4, mlm=True, size_bining=False, **kwargs):
+        super().__init__(dataset_dir, anno_csv, **kwargs)
         self.tokenizer = tokenizer
         self.mask_prob = mask_prob
         self.mlm = mlm
@@ -227,6 +228,28 @@ class EncodedBBMS(BoxedBMS):
         #     masked_ids = masked_ids + ([0] * (self.max_masked_tokens - num_masked))
         input_ids = [self.tokenizer.token_to_id(t) for t in tokens]
 
+        if self.max_cap_len is not None:
+            # NOTE: going this path when we are inference on data with unknown caption length
+            ext_len = max(0, self.max_cap_len - len(input_ids))
+            if ext_len > 0:
+                input_ids += [self.tokenizer.token_to_id('[MASK]')] * ext_len
+                ext_ids = encoding.ids + [self.tokenizer.token_to_id('[PAD]')] * ext_len
+                ext_tokens = encoding.tokens + ['[PAD]'] * ext_len
+                ext_type_ids = encoding.type_ids + [1] * ext_len
+                ext_attention_mask = encoding.attention_mask + [1] * ext_len
+                masked_pos = torch.cat([masked_pos, torch.ones(ext_len, dtype=torch.int)])
+                masked_ids += [self.tokenizer.token_to_id('[PAD]')] * ext_len
+
+                return MaskedEncoding(
+                    ids=input_ids,
+                    src_ids=ext_ids,
+                    tokens=ext_tokens,
+                    type_ids=ext_type_ids,
+                    attention_mask=ext_attention_mask,
+                    offsets=encoding.offsets,
+                    masked_pos=masked_pos,
+                    masked_ids=masked_ids,
+                )
         return MaskedEncoding(
             ids=input_ids,
             src_ids=encoding.ids,

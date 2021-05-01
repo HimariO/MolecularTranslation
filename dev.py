@@ -47,7 +47,7 @@ def test_base_dataset(batch_size=8):
 
     tokenizer = Tokenizer.from_file(tk_model_file)
     bbms_coll = collator.EncodedBatchCollator()
-    bbms = bms_caption.EncodedBBMS(train_dir, labels, tokenizer, mlm=False)
+    bbms = bms_caption.EncodedBBMS(train_dir, labels, tokenizer, mlm=False, max_cap_len=200)
     loader = DataLoader(bbms, batch_size=batch_size, collate_fn=bbms_coll, num_workers=0)
     
     print(len(bbms))
@@ -227,8 +227,8 @@ with logger.catch(reraise=True):
     # test_visual_feat_extract()
     # test_base_dataset()
     # test_img_cap_bert()
-    # test_monocle(is_training=False, ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_7/checkpoints/epoch=0-step=31053.ckpt")
+    test_monocle(is_training=False, ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_2/checkpoints/epoch=0-step=53365.ckpt")
     # test_monocle()
-    test_monocle_pl_trainer(
-        ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_0/checkpoints/epoch=0-step=27883.ckpt",
-        overfit=False)
+    # test_monocle_pl_trainer(
+    #     ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_1/checkpoints/epoch=0-step=73023.ckpt",
+    #     overfit=False)
