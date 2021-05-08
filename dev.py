@@ -96,6 +96,9 @@ def test_img_cap_bert():
 
 
 def test_monocle(ckpt=None, is_training=True, device='cuda:1'):
+    """
+    testing burt force token-wise inference
+    """
 
     def to_cuda(stuff):
         if isinstance(stuff, torch.Tensor):
@@ -227,8 +230,8 @@ with logger.catch(reraise=True):
     # test_visual_feat_extract()
     # test_base_dataset()
     # test_img_cap_bert()
-    test_monocle(is_training=False, ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_2/checkpoints/epoch=0-step=53365.ckpt")
+    # test_monocle(is_training=True, ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_2/checkpoints/epoch=0-step=53365.ckpt")
     # test_monocle()
-    # test_monocle_pl_trainer(
-    #     ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_1/checkpoints/epoch=0-step=73023.ckpt",
-    #     overfit=False)
+    test_monocle_pl_trainer(
+        ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_2/checkpoints/epoch=0-step=53365.ckpt",
+        overfit=False)

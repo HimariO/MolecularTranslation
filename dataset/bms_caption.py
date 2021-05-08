@@ -46,6 +46,7 @@ VisAttenEncoding = namedtuple(
     "masked_pos",
     "masked_ids",])
 
+
 class BoxedBMS(Dataset):
 
     TMP_DIR = os.path.join(os.environ['HOME'], 'bms_tmp')
@@ -120,7 +121,7 @@ class BoxedBMS(Dataset):
             boxes /= wh
             boxes = torch.clip(boxes, 0, 1)
             boxes *= wh
-        return boxes
+        return anno, boxes
     
     def cap_img_size(self, img, bbox):
         h, w = img.shape[-2:]
@@ -138,20 +139,20 @@ class BoxedBMS(Dataset):
         caption = self.id2cap[key]
         img_path, bbox_json_path = self.id2imgdet[key]
         img = self.load_image(img_path)
-        boxes = self.load_bbox(bbox_json_path)
+        _, boxes = self.load_bbox(bbox_json_path)
         img, boxes = self.cap_img_size(img, boxes)
         return key, img, boxes, caption
 
     def __getitem__(self, i) -> Tuple[torch.Tensor, torch.Tensor, str]:
-        boxes = None
-        while boxes is None:
+        data = None
+        while data is None:
             try:
-                key, img, boxes, caption = self.get_sample(i)
+                data = self.get_sample(i)
             except:
                 key = self.imgids[i]
                 logger.warning(f"Get a zero box sample: {key}")
             i += 1
-        return key, img, boxes, caption
+        return data
 
 
 class EncodedBBMS(BoxedBMS):
@@ -159,11 +160,12 @@ class EncodedBBMS(BoxedBMS):
     max_masked_tokens = 64
 
     def __init__(self, dataset_dir: str, anno_csv: str, tokenizer: Tokenizer,
-                mask_prob=0.4, mlm=True, size_bining=False, **kwargs):
+                mask_prob=0.4, mlm=True, det_inchi=False, size_bining=False, **kwargs):
         super().__init__(dataset_dir, anno_csv, **kwargs)
         self.tokenizer = tokenizer
         self.mask_prob = mask_prob
         self.mlm = mlm
+        self.det_inchi = det_inchi
     
     def create_token_bins(self, bin_size=25):
         id2len = {k: len(v) for k, v in self.id2cap.items()}
@@ -189,7 +191,7 @@ class EncodedBBMS(BoxedBMS):
             groups = groups[:max(1, int(len(groups) * self.mask_prob))]
             masked_ids = []
             for group in groups:
-                masked_ids += list(range(group[0], max(b, group[1] + 1)))
+                masked_ids += list(range(group[0], min(b, group[1] + 1)))
             return masked_ids
 
         tokens = encoding.tokens
@@ -220,12 +222,7 @@ class EncodedBBMS(BoxedBMS):
 
         masked_pos[masked_idx] = 1
         # pad masked tokens to the same length
-        # if num_masked < self.max_masked_tokens:
-        #     masked_token = masked_token + (['[PAD]'] * (self.max_masked_tokens - num_masked))
         masked_ids = [self.tokenizer.token_to_id(t) for t in masked_token]  # shape: (num_masked,)
-        # if num_masked < self.max_masked_tokens:
-        #     # NOTE: correspone to model_bert:L654 padding check
-        #     masked_ids = masked_ids + ([0] * (self.max_masked_tokens - num_masked))
         input_ids = [self.tokenizer.token_to_id(t) for t in tokens]
 
         if self.max_cap_len is not None:
@@ -250,16 +247,17 @@ class EncodedBBMS(BoxedBMS):
                     masked_pos=masked_pos,
                     masked_ids=masked_ids,
                 )
-        return MaskedEncoding(
-            ids=input_ids,
-            src_ids=encoding.ids,
-            tokens=encoding.tokens,
-            type_ids=encoding.type_ids,
-            attention_mask=encoding.attention_mask,
-            offsets=encoding.offsets,
-            masked_pos=masked_pos,
-            masked_ids=masked_ids,
-        )
+        else:
+            return MaskedEncoding(
+                ids=input_ids,
+                src_ids=encoding.ids,
+                tokens=encoding.tokens,
+                type_ids=encoding.type_ids,
+                attention_mask=encoding.attention_mask,
+                offsets=encoding.offsets,
+                masked_pos=masked_pos,
+                masked_ids=masked_ids,
+            )
     
     def extend_visual_atten(
             self,
@@ -291,9 +289,29 @@ class EncodedBBMS(BoxedBMS):
             masked_ids=torch.tensor(encoding.masked_ids) if hasattr(encoding, 'masked_ids') else None,
             masked_pos=encoding.masked_pos if hasattr(encoding, 'masked_pos') else None)
     
+    def get_sample(self, i):
+        key = self.imgids[i]
+        caption = self.id2cap[key]
+        img_path, bbox_json_path = self.id2imgdet[key]
+        img = self.load_image(img_path)
+        det_anno, boxes = self.load_bbox(bbox_json_path)
+        img, boxes = self.cap_img_size(img, boxes)
+
+        if self.det_inchi:
+            det_inchi = det_anno['inchi']
+            return key, img, boxes, caption, det_inchi
+        else:
+            return key, img, boxes, caption
+    
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor, Union[Encoding, ]]:
-        key, img, boxes, caption = super().__getitem__(i)
+        data = super().__getitem__(i)
+        key, img, boxes, caption = data[:4]
         encoding = self.tokenizer.encode(f"[CLS]{caption}[SEP]")
         encoding = self.random_mask_caption(encoding, is_mlm=self.mlm)
         encoding = self.extend_visual_atten(encoding, boxes)
+
+        if self.det_inchi:
+            assert len(data) == 5
+            det_inchi = data[4]
+
         return key, img, boxes, encoding

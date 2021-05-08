@@ -1,4 +1,5 @@
 import os
+import random
 
 import torch
 import numpy as np
@@ -12,6 +13,20 @@ from .collator import EncodedBatchCollator
 
 def worker_init_fn(worker_id):                                                          
     np.random.seed(np.random.get_state()[1][0] + worker_id)
+
+
+class RandSampleDataset:
+
+    def __init__(self, datasets) -> None:
+        self.datasets = datasets
+        self.min_size = min([len(d) for d in datasets])
+    
+    def __getitem__(self, index):
+        index = index % self.min_size
+        return random.choice(self.datasets)[index]
+    
+    def __len__(self,):
+        return self.min_size
 
 
 class LitBBMS(pl.LightningDataModule):
@@ -28,13 +43,19 @@ class LitBBMS(pl.LightningDataModule):
         self.val_anno_csv = anno_csv if val_anno_csv is None else val_anno_csv
     
     def train_dataloader(self) -> EncodedBBMS:
-        dataset = EncodedBBMS(
+        mlm_dataset = EncodedBBMS(
+            self.train_dir,
+            self.anno_csv,
+            self.tokenizer,
+            mlm=True)
+        mask_dataset = EncodedBBMS(
             self.train_dir,
             self.anno_csv,
             self.tokenizer,
             mlm=False)
+        zip_dataset = RandSampleDataset([mlm_dataset, mask_dataset])
         loader = DataLoader(
-            dataset,
+            zip_dataset,
             shuffle=True,
             batch_size=self.batch_size,
             num_workers=self.num_worker,
