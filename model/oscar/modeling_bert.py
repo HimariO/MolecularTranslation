@@ -759,11 +759,16 @@ class BertForImageCaptioning(CaptionPreTrainedModel):
                 self.od_labels_len+self.img_seq_len+start_pos: self.od_labels_len+self.img_seq_len+end_pos,
                 :self.od_labels_len+self.img_seq_len+end_pos]
 
-        return {'input_ids': input_ids, 'img_feats': img_feats,
-            'masked_pos': masked_pos, 'attention_mask': attention_mask,
-            'token_type_ids': token_type_ids, 'position_ids': position_ids,
+        return {
+            'input_ids': input_ids,
+            'img_feats': img_feats,
+            'masked_pos': masked_pos,
+            'attention_mask': attention_mask,
+            'token_type_ids': token_type_ids,
+            'position_ids': position_ids,
             'is_training': False,
-            'encoder_history_states': self.prev_encoded_layers}
+            'encoder_history_states': self.prev_encoded_layers
+        }
 
     def get_output_embeddings(self):
         return self.decoder
@@ -809,12 +814,13 @@ class BertForImageCaptioning(CaptionPreTrainedModel):
             assert input_ids.shape[0] == batch_size
             od_label_ids = input_ids[:, self.max_seq_len:]
             self.od_labels_len = input_ids.shape[1] - self.max_seq_len
-            input_ids = None
+            # input_ids = None
         else:
             self.od_labels_len = 0
             od_label_ids = None
-            assert input_ids.shape == (batch_size, self.max_seq_len)
-            input_ids = None
+            assert input_ids.shape == (batch_size, self.max_seq_len), \
+                f"{input_ids.shape} != {(batch_size, self.max_seq_len)}"
+            # input_ids = None
 
         if input_ids is None:
             input_ids = torch.full(

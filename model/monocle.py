@@ -55,7 +55,8 @@ class Monocle(pl.LightningModule):
             masked_pos=None,
             masked_ids=None,
             is_decode=False,
-            is_training=False) -> Tuple[torch.Tensor]:
+            is_training=False,
+            **kwargs) -> Tuple[torch.Tensor]:
         feat_map = self.backbone(imgs)
         scale = feat_map.shape[-1] / imgs.shape[-1]
         rois = tv.ops.roi_align(feat_map, boxes, 3, spatial_scale=scale, aligned=True)
@@ -72,12 +73,21 @@ class Monocle(pl.LightningModule):
         assert img_feats.shape[1] + input_ids.shape[1] == attention_mask.shape[1], \
             f"{img_feats.shape[1]} + {input_ids.shape[1]} != {attention_mask.shape[1]}"
 
-        inputs = {
-            'input_ids': input_ids, 'attention_mask': attention_mask,
-            'token_type_ids': token_type_ids, 'img_feats': img_feats, 
-            'masked_pos': masked_pos, 'masked_ids': masked_ids,
-            "is_decode": is_decode, "is_training": is_training,
-        }
+        if is_decode:
+            inputs = {
+                'input_ids': input_ids, 'attention_mask': attention_mask,
+                'token_type_ids': token_type_ids, 'img_feats': img_feats, 
+                'masked_pos': masked_pos,
+                "is_decode": is_decode,
+                **kwargs
+            }
+        else:
+            inputs = {
+                'input_ids': input_ids, 'attention_mask': attention_mask,
+                'token_type_ids': token_type_ids, 'img_feats': img_feats, 
+                'masked_pos': masked_pos, 'masked_ids': masked_ids,
+                "is_decode": is_decode, "is_training": is_training,
+            }
         output = self.bert(**inputs)
         if is_training:
             logits = output[1]
@@ -86,7 +96,7 @@ class Monocle(pl.LightningModule):
         return output
     
     def training_step(self, batch, batch_idx):
-        keys, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = batch
+        keys, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = batch[:8]
         inputs = {
             'attention_mask': atten_mask,
             'token_type_ids': type_ids,
@@ -120,7 +130,7 @@ class Monocle(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        keys, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = batch
+        keys, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = batch[:8]
         inputs = {
             'attention_mask': atten_mask,
             'token_type_ids': type_ids,
@@ -158,4 +168,4 @@ class Monocle(pl.LightningModule):
         self.log('val_aucc_epoch', self.val_accuracy.compute(), prog_bar=True)
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=0.0001)
+        return torch.optim.Adam(self.parameters(), lr=0.00001)

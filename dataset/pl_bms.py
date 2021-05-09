@@ -77,3 +77,60 @@ class LitBBMS(pl.LightningDataModule):
             collate_fn=EncodedBatchCollator(),
             worker_init_fn=worker_init_fn)
         return loader
+
+
+class LitDetBBMS(LitBBMS):
+
+    def train_dataloader(self) -> EncodedBBMS:
+        """
+        Task1: inchi str from detection atom/bond graph with added mask and token swap
+        """
+        # mlm_dataset = EncodedBBMS(
+        #     self.train_dir,
+        #     self.anno_csv,
+        #     self.tokenizer,
+        #     mlm=True,
+        #     det_inchi=True,)
+        """
+        Task2: completly masked input token to target inchi str
+        """
+        mask_dataset = EncodedBBMS(
+            self.train_dir,
+            self.anno_csv,
+            self.tokenizer,
+            mlm=False)
+        """
+        Task3: translate inaccurate inchi str from detection atom/bond graph to target inchi str
+        """
+        translate_dataset = EncodedBBMS(
+            self.train_dir,
+            self.anno_csv,
+            self.tokenizer,
+            mlm=False,
+            det_inchi=True,)
+        zip_dataset = RandSampleDataset([mask_dataset, translate_dataset])
+        loader = DataLoader(
+            zip_dataset,
+            shuffle=True,
+            batch_size=self.batch_size,
+            num_workers=self.num_worker,
+            collate_fn=EncodedBatchCollator(),
+            worker_init_fn=worker_init_fn)
+        return loader
+    
+    def val_dataloader(self) -> EncodedBBMS:
+        dataset = EncodedBBMS(
+            self.val_dir,
+            self.val_anno_csv,
+            self.tokenizer,
+            mlm=False,
+            det_inchi=True,
+            mask_prob=1e-10)
+        loader = DataLoader(
+            dataset,
+            shuffle=False,
+            batch_size=self.batch_size,
+            num_workers=self.num_worker,
+            collate_fn=EncodedBatchCollator(),
+            worker_init_fn=worker_init_fn)
+        return loader

@@ -1,4 +1,5 @@
 import os
+import copy
 import glob
 import json
 import math
@@ -18,6 +19,15 @@ from torch._C import dtype
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
+
+EditableEncoding = namedtuple(
+    "EditableEncoding",
+    ["ids",
+    "src_ids",
+    "type_ids",
+    "tokens",
+    "offsets",
+    "attention_mask",])
 
 MaskedEncoding = namedtuple(
     "MaskedEncoding",
@@ -166,6 +176,12 @@ class EncodedBBMS(BoxedBMS):
         self.mask_prob = mask_prob
         self.mlm = mlm
         self.det_inchi = det_inchi
+        # if self.det_inchi:
+        #     """
+        #     if we disable mlm it will turn all text input token to [MASK]
+        #     which make det_inchi option useless
+        #     """
+        #     assert self.mlm
     
     def create_token_bins(self, bin_size=25):
         id2len = {k: len(v) for k, v in self.id2cap.items()}
@@ -178,7 +194,9 @@ class EncodedBBMS(BoxedBMS):
         logger.info(f"Created {len(bins)} bins with bin size {bin_size}")
         return bins
             
-    def random_mask_caption(self, encoding: Encoding, is_mlm=True) -> MaskedEncoding:
+    def random_mask_caption(self,
+                            encoding: Union[Encoding, EditableEncoding],
+                            is_mlm=True) -> MaskedEncoding:
 
         def random_continue_idx(a, b):
             i = a
@@ -194,36 +212,51 @@ class EncodedBBMS(BoxedBMS):
                 masked_ids += list(range(group[0], min(b, group[1] + 1)))
             return masked_ids
 
-        tokens = encoding.tokens
-        seq_a_len = len(tokens)  # NOTE: accounting [SEP] token in between caption and img feat
+        # tokens = encoding.tokens
+        input_ids = copy.deepcopy(encoding.ids)
+        sep_ind = input_ids.index(self.tokenizer.token_to_id('[SEP]'))
+        seq_a_len = len(input_ids)  # NOTE: accounting [SEP] token in between caption and img feat
         masked_pos = torch.zeros(seq_a_len, dtype=torch.int)
+        
         # randomly mask words for prediction, ignore [CLS]
         if is_mlm:
-            candidate_masked_idx = random_continue_idx(1, seq_a_len)
+            candidate_masked_idx = random_continue_idx(1, sep_ind + 1)
         else:
             candidate_masked_idx = list(range(1, seq_a_len)) # only mask text_a
         num_masked = len(candidate_masked_idx)
         masked_idx = candidate_masked_idx[:num_masked]
         masked_idx = sorted(masked_idx)
-        masked_token = [tokens[i] for i in masked_idx]
+        # masked_token = [tokens[i] for i in masked_idx]
+        if not self.det_inchi:
+            masked_ids = [input_ids[t] for t in masked_idx]  # shape: (num_masked,)
+        else:
+            masked_ids = [encoding.src_ids[t] for t in masked_idx]  # shape: (num_masked,)
+        
         for pos in masked_idx:
-            if random.random() <= 0.8:
-                # 80% chance to be a ['MASK'] token
-                tokens[pos] = '[MASK]'
-            elif random.random() <= 0.5:
-                # 10% chance to be a random word ((1-0.8)*0.5)
-                from random import randint
-                i = randint(0, self.tokenizer.get_vocab_size() - 1)
-                # self.tokenizer._convert_id_to_token(i)
-                tokens[pos] = self.tokenizer.id_to_token(i)
+            if self.det_inchi:
+                if random.random() <= 0.1:
+                    # 10% chance to be a random word ((1-0.8)*0.5)
+                    i = random.randint(0, self.tokenizer.get_vocab_size() - 1)
+                    input_ids[pos] = i
+                else:
+                    # 10% chance to remain the same (1-0.8-0.1)
+                    pass
             else:
-                # 10% chance to remain the same (1-0.8-0.1)
-                pass
+                if random.random() <= 0.8:
+                    # 80% chance to be a ['MASK'] token
+                    input_ids[pos] = self.tokenizer.token_to_id('[MASK]')
+                elif random.random() <= 0.5:
+                    # 10% chance to be a random word ((1-0.8)*0.5)
+                    i = random.randint(0, self.tokenizer.get_vocab_size() - 1)
+                    input_ids[pos] = i
+                else:
+                    # 10% chance to remain the same (1-0.8-0.1)
+                    pass
 
         masked_pos[masked_idx] = 1
         # pad masked tokens to the same length
-        masked_ids = [self.tokenizer.token_to_id(t) for t in masked_token]  # shape: (num_masked,)
-        input_ids = [self.tokenizer.token_to_id(t) for t in tokens]
+        # masked_ids = [self.tokenizer.token_to_id(t) for t in masked_token]  # shape: (num_masked,)
+        # input_ids = [self.tokenizer.token_to_id(t) for t in tokens]
 
         if self.max_cap_len is not None:
             # NOTE: going this path when we are inference on data with unknown caption length
@@ -247,17 +280,16 @@ class EncodedBBMS(BoxedBMS):
                     masked_pos=masked_pos,
                     masked_ids=masked_ids,
                 )
-        else:
-            return MaskedEncoding(
-                ids=input_ids,
-                src_ids=encoding.ids,
-                tokens=encoding.tokens,
-                type_ids=encoding.type_ids,
-                attention_mask=encoding.attention_mask,
-                offsets=encoding.offsets,
-                masked_pos=masked_pos,
-                masked_ids=masked_ids,
-            )
+        return MaskedEncoding(
+            ids=input_ids,
+            src_ids=encoding.ids,
+            tokens=encoding.tokens,
+            type_ids=encoding.type_ids,
+            attention_mask=encoding.attention_mask,
+            offsets=encoding.offsets,
+            masked_pos=masked_pos,
+            masked_ids=masked_ids,
+        )
     
     def extend_visual_atten(
             self,
@@ -303,15 +335,50 @@ class EncodedBBMS(BoxedBMS):
         else:
             return key, img, boxes, caption
     
-    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor, Union[Encoding, ]]:
+    def fuse_cap_det_inchi(self, src_encoding: Encoding, det_inchi: str) -> EditableEncoding:
+        det_encoding: Encoding = self.tokenizer.encode(f"[CLS]{det_inchi}[SEP]")
+        pad_id = self.tokenizer.token_to_id('[PAD]')
+        pad_size = len(src_encoding.ids) - len(det_encoding.ids)
+        det_ids = det_encoding.ids
+
+        if pad_size > 0:
+            pad_det_ids = det_ids + [pad_id] * pad_size
+            return EditableEncoding(
+                ids=pad_det_ids,
+                src_ids=src_encoding.ids,
+                tokens=src_encoding.tokens,
+                type_ids=src_encoding.type_ids,
+                attention_mask=src_encoding.attention_mask,
+                offsets=src_encoding.offsets,
+            )
+        else:
+            pad_size = abs(pad_size)
+
+            src_ids = src_encoding.ids + [pad_id] * pad_size
+            tokens = src_encoding.tokens + ['[PAD]'] * pad_size
+            type_ids = src_encoding.type_ids + [1] * pad_size
+            attention_mask = src_encoding.attention_mask + [1] * pad_size
+
+            return EditableEncoding(
+                ids=det_ids,
+                src_ids=src_ids,
+                tokens=tokens,
+                type_ids=type_ids,
+                attention_mask=attention_mask,
+                offsets=src_encoding.offsets,
+            )
+
+    
+    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor, Union[Encoding, EditableEncoding]]:
         data = super().__getitem__(i)
         key, img, boxes, caption = data[:4]
         encoding = self.tokenizer.encode(f"[CLS]{caption}[SEP]")
-        encoding = self.random_mask_caption(encoding, is_mlm=self.mlm)
-        encoding = self.extend_visual_atten(encoding, boxes)
-
+        
         if self.det_inchi:
             assert len(data) == 5
             det_inchi = data[4]
-
+            encoding = self.fuse_cap_det_inchi(encoding, det_inchi)
+        
+        encoding = self.random_mask_caption(encoding, is_mlm=self.mlm)
+        encoding = self.extend_visual_atten(encoding, boxes)
         return key, img, boxes, encoding
