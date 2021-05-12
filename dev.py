@@ -15,6 +15,7 @@ from model.oscar.modeling_bert import BertForImageCaptioning
 from model.efficientnet.net import EfficientNet
 from model.monocle import Monocle
 from dataset.pl_bms import LitBBMS, LitDetBBMS
+from dataset.tokenizer import basic_tokenizer
 
 
 # tk_model_file = "./checkpoints/bms_worldpiece_tokenizer.json"
@@ -32,7 +33,10 @@ def test_visual_feat_extract():
     feat_map = backbone(x1)
     print(feat_map.shape)
 
-    x2 = torch.arange(0, 100).view(1, 1 ,10, 10).float()
+    # x2 = torch.arange(0, 100).view(1, 1 ,10, 10).float()
+    n = 10
+    grid_x, grid_y = torch.meshgrid(torch.arange(n), torch.arange(n))
+    x2 = torch.stack([grid_x, grid_y], dim=0).view(1, 2, n, n).float()
     boxes = [
         torch.tensor([[10, 10, 40, 40]]).float()
     ]
@@ -173,7 +177,8 @@ def test_monocle(ckpt=None, is_training=True, device='cuda:1', max_length=None, 
             
     # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
     global tk_model_file
-    tokenizer = Tokenizer.from_file(tk_model_file)
+    # tokenizer = Tokenizer.from_file(tk_model_file)
+    tokenizer = basic_tokenizer(custom_decoder=True)
     pretrain_dir = "./config/bms_img_cap_bert/"
     config = BertConfig.from_pretrained(pretrain_dir)
     if ckpt:
@@ -182,6 +187,7 @@ def test_monocle(ckpt=None, is_training=True, device='cuda:1', max_length=None, 
         bert = Monocle(config)
     bert.to(device)
     # print(bert)
+    bert.eval()
 
     loader = test_base_dataset(batch_size=1, max_cap_len=max_length)
     
@@ -245,6 +251,74 @@ def test_monocle(ckpt=None, is_training=True, device='cuda:1', max_length=None, 
         print('-' * 100)
 
 
+def test_monocle_overfit(ckpt=None, is_training=True, device='cuda:0', max_length=None, beam_search=False,):
+    """
+    testing burt force token-wise inference
+    """
+
+    def to_cuda(stuff):
+        if isinstance(stuff, torch.Tensor):
+            return stuff.to(device)
+        elif iterable(stuff):
+            return [to_cuda(s) for s in stuff]
+        else:
+            raise RuntimeError(f"{type(stuff)} !?")
+            
+    # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
+    global tk_model_file
+    tokenizer = Tokenizer.from_file(tk_model_file)
+    pretrain_dir = "./config/bms_img_cap_bert/"
+    config = BertConfig.from_pretrained(pretrain_dir)
+    if ckpt:
+        bert = Monocle.load_from_checkpoint(ckpt, bert_config=config)
+    else:
+        bert = Monocle(config)
+    bert.to(device)
+    # print(bert)
+    bert.train()
+    adam = bert.configure_optimizers()
+
+    init_cnn_param = [p.cpu().detach() for p in bert.backbone.parameters()]
+
+    loader = test_base_dataset(batch_size=8, max_cap_len=max_length)
+    
+    for i, sample in enumerate(loader):
+        
+        if i > 2:
+            break
+        sample = sample[1:]
+        sample = [to_cuda(s) for s in sample]
+        img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample[:8]
+
+        for j in range(128):
+            adam.zero_grad()
+            inputs = {
+                'attention_mask': atten_mask,
+                'token_type_ids': type_ids,
+                'masked_pos': mask_pos,
+                'masked_ids': mask_ids,
+                'is_decode': False,
+                'is_training': is_training,
+            }
+            output = bert(img, boxes, ids, **inputs)
+            
+            # print(f'[{i}] seq_len: {ids.shape}, img size: {img.shape}, img_val_min_max: {img.min()}/{img.max()}')
+            loss, logits = output[:2]
+            print(f'[{i},{j}] loss: ', loss)
+
+            pred_ids = torch.argmax(logits, dim=-1)
+            pred_strs = tokenizer.decode(pred_ids.cpu().numpy())
+            token_delta = mask_ids[mask_ids!=0] - pred_ids
+
+            loss.backward()
+            adam.step()
+
+            if loss < 0.02:
+                param_d = [(p1 - p2.cpu().detach()).mean() for p1, p2 in zip(init_cnn_param, bert.backbone.parameters())]
+                print(param_d)
+            print('-' * 100)
+
+
 def test_lit_data():
     global tk_model_file
     tokenizer = Tokenizer.from_file(tk_model_file)
@@ -270,18 +344,15 @@ with logger.catch(reraise=True):
     # test_visual_feat_extract()
     # test_base_dataset()
     # test_img_cap_bert()
-    # test_monocle(
-    #     is_training=False,
-    #     beam_search=False,
-    #     max_length=200,
-    #     ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_3/checkpoints/epoch=0-step=53999.ckpt"
-    # )
+    test_monocle(
+        is_training=False,
+        beam_search=False,
+        max_length=200,
+        ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_3/checkpoints/epoch=0-step=53999.ckpt"
+    )
     # test_monocle()
-
-    # test_monocle_pl_trainer(
-    #     ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_4/checkpoints/epoch=0-step=68938.ckpt",
-    #     overfit=False)
 
     # test_beam_serach_bert()
 
-    test_lit_data()
+    # test_lit_data()
+    # test_monocle_overfit()

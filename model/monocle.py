@@ -59,7 +59,7 @@ class Monocle(pl.LightningModule):
             **kwargs) -> Tuple[torch.Tensor]:
         feat_map = self.backbone(imgs)
         scale = feat_map.shape[-1] / imgs.shape[-1]
-        rois = tv.ops.roi_align(feat_map, boxes, 3, spatial_scale=scale, aligned=True)
+        rois = tv.ops.roi_align(feat_map, boxes, 5, spatial_scale=scale, aligned=True)
         rois = rois.mean(dim=[-1, -2])
         
         w = imgs.shape[-1]
@@ -159,7 +159,9 @@ class Monocle(pl.LightningModule):
             tensorboard = self.logger.experiment
             tensorboard.add_text('train_batch_pred_txt', log_str, global_step=batch_idx)
 
-        self.val_accuracy(pred[mask_pos != 0], masked_ids)
+        partial_pred = pred[mask_pos != 0][masked_ids != 4]
+        partial_maskid = masked_ids[masked_ids != 4]
+        self.val_accuracy(partial_pred, partial_maskid)
         return {
             'predict': torch.max(logits, -1)[1].data
         }
@@ -168,4 +170,4 @@ class Monocle(pl.LightningModule):
         self.log('val_aucc_epoch', self.val_accuracy.compute(), prog_bar=True)
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=0.00001)
+        return torch.optim.Adam(self.parameters(), lr=0.0001)
