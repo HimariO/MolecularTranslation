@@ -21,17 +21,17 @@ from dataset.tokenizer import basic_tokenizer
 tk_model_file = "./checkpoints/bms_tokenizer.json"
 
 
-def test_monocle_pl_trainer(overfit=True, ckpt=None):
+def test_monocle_pl_trainer(overfit=True, ckpt=None, state_dict=None, batch_size=12):
     global tk_model_file
     # tokenizer = Tokenizer.from_file(tk_model_file)
     tokenizer = basic_tokenizer()
-    lit_dataset = LitBBMS(
+    lit_dataset = LitDetBBMS(
         '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train',
         '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/val',
         tokenizer,
         '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train_labels.csv',
         num_worker=2,
-        batch_size=12,
+        batch_size=batch_size,
     )
 
     # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
@@ -40,6 +40,9 @@ def test_monocle_pl_trainer(overfit=True, ckpt=None):
     config = BertConfig.from_pretrained(pretrain_dir)
     if ckpt:
         bert = Monocle.load_from_checkpoint(ckpt, bert_config=config)
+    elif state_dict:
+        bert = Monocle(config)
+        bert.load_state_dict(torch.load(state_dict))
     else:
         bert = Monocle(config)
     
@@ -82,4 +85,7 @@ def test_monocle_pl_trainer(overfit=True, ckpt=None):
 with logger.catch(reraise=True):
     test_monocle_pl_trainer(
         ckpt=None,
-        overfit=False)
+        state_dict="checkpoints/coco_monocle.pth",
+        overfit=False,
+        batch_size=12,
+    )

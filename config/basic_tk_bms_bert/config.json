@@ -33,5 +33,5 @@
   "torchscript": false,
   "type_vocab_size": 2,
   "use_img_layernorm": 0,
-  "vocab_size": 196
+  "vocab_size": 197
 }

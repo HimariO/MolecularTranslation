@@ -12,6 +12,7 @@ class EncodedBatchCollator:
 
     def __call__(self, batch):
         all_boxes = []
+        all_tokens = []
         shapes = defaultdict(list)
         for data in batch:
             key, img, boxes, encoding = data
@@ -23,6 +24,7 @@ class EncodedBatchCollator:
             # NOTE: we are not appling dynamic padding on masked_ids(masked toekn label)
             #   because its already been pad to fixed size and wont be feed into model(not affect inferece time)
             all_boxes.append(boxes)
+            all_tokens.append(encoding.tokens)
         
         max_shape = {
             k: np.asarray(v).max(axis=0)
@@ -101,4 +103,5 @@ class EncodedBatchCollator:
             torch.stack(padded['attention_mask']),
             torch.stack(padded['masked_pos']),
             torch.stack(padded['masked_ids']),
+            all_tokens,
         )

@@ -94,11 +94,11 @@ class LitDetBBMS(LitBBMS):
         """
         Task2: completly masked input token to target inchi str
         """
-        mask_dataset = EncodedBBMS(
-            self.train_dir,
-            self.anno_csv,
-            self.tokenizer,
-            mlm=False)
+        # mask_dataset = EncodedBBMS(
+        #     self.train_dir,
+        #     self.anno_csv,
+        #     self.tokenizer,
+        #     mlm=False)
         """
         Task3: translate inaccurate inchi str from detection atom/bond graph to target inchi str
         """
@@ -107,8 +107,9 @@ class LitDetBBMS(LitBBMS):
             self.anno_csv,
             self.tokenizer,
             mlm=False,
+            full_atten=True,
             det_inchi=True,)
-        zip_dataset = RandSampleDataset([mask_dataset, translate_dataset])
+        zip_dataset = RandSampleDataset([translate_dataset])
         loader = DataLoader(
             zip_dataset,
             shuffle=True,
@@ -125,7 +126,7 @@ class LitDetBBMS(LitBBMS):
             self.tokenizer,
             mlm=False,
             det_inchi=True,
-            mask_prob=1e-10)
+            mask_prob=0.0)
         loader = DataLoader(
             dataset,
             shuffle=False,

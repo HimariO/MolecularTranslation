@@ -173,12 +173,14 @@ class EncodedBBMS(BoxedBMS):
     max_masked_tokens = 64
 
     def __init__(self, dataset_dir: str, anno_csv: str, tokenizer: Tokenizer,
-                mask_prob=0.4, mlm=True, det_inchi=False, size_bining=False, **kwargs):
+                mask_prob=0.4, mlm=True, det_inchi=False, size_bining=False,
+                full_atten=False, **kwargs):
         super().__init__(dataset_dir, anno_csv, **kwargs)
         self.tokenizer = tokenizer
         self.mask_prob = mask_prob
         self.mlm = mlm
         self.det_inchi = det_inchi
+        self.full_atten = full_atten
         # if self.det_inchi:
         #     """
         #     if we disable mlm it will turn all text input token to [MASK]
@@ -205,7 +207,7 @@ class EncodedBBMS(BoxedBMS):
             i = a
             groups = []
             while i < b:
-                group_size = random.randint(3, 8)
+                group_size = random.randint(2, 4)
                 groups.append([i, min(b, i + group_size)])
                 i += group_size + 1
             random.shuffle(groups)
@@ -216,18 +218,29 @@ class EncodedBBMS(BoxedBMS):
             return masked_ids
 
         # tokens = encoding.tokens
+        mid = self.tokenizer.token_to_id('[MASK]')
         input_ids = copy.deepcopy(encoding.ids)
-        sep_ind = input_ids.index(self.tokenizer.token_to_id('[SEP]'))
         seq_a_len = len(input_ids)  # NOTE: accounting [SEP] token in between caption and img feat
         masked_pos = torch.zeros(seq_a_len, dtype=torch.int)
         
         # randomly mask words for prediction, ignore [CLS]
         if is_mlm:
+            try:
+                sep_ind = input_ids.index(self.tokenizer.token_to_id('[SEP]'))
+            except ValueError:
+                sep_ind = input_ids.index(mid)
             candidate_masked_idx = random_continue_idx(1, sep_ind + 1)
         else:
             candidate_masked_idx = list(range(1, seq_a_len)) # only mask text_a
         num_masked = len(candidate_masked_idx)
         masked_idx = candidate_masked_idx[:num_masked]
+
+        # NOTE: input_ids may contain [MASK] before pass to this method,
+        #       so we check and include them into masked-idx here
+        for i, iid in enumerate(input_ids):
+            if iid == mid:
+                masked_idx.append(i)
+        masked_idx = list(set(masked_idx))
         masked_idx = sorted(masked_idx)
         # masked_token = [tokens[i] for i in masked_idx]
         if not self.det_inchi:
@@ -255,11 +268,7 @@ class EncodedBBMS(BoxedBMS):
                 else:
                     # 10% chance to remain the same (1-0.8-0.1)
                     pass
-
         masked_pos[masked_idx] = 1
-        # pad masked tokens to the same length
-        # masked_ids = [self.tokenizer.token_to_id(t) for t in masked_token]  # shape: (num_masked,)
-        # input_ids = [self.tokenizer.token_to_id(t) for t in tokens]
 
         if self.max_cap_len is not None:
             # NOTE: going this path when we are inference on data with unknown caption length
@@ -308,7 +317,10 @@ class EncodedBBMS(BoxedBMS):
         n = a + b
         attention_mask = torch.zeros([n, n], dtype=torch.long)
         # import pdb; pdb.set_trace()
-        attention_mask[:a, :a] = torch.tril(torch.ones((a, a), dtype=torch.long))
+        if self.full_atten:
+            attention_mask[:a, :a] = 1
+        else:
+            attention_mask[:a, :a] = torch.tril(torch.ones((a, a), dtype=torch.long))
         attention_mask[a:, a:] = 1
         attention_mask[:a, a:] = 1
         # attention_mask = attention_mask.float()
@@ -339,13 +351,14 @@ class EncodedBBMS(BoxedBMS):
             return key, img, boxes, caption
     
     def fuse_cap_det_inchi(self, src_encoding: Encoding, det_inchi: str) -> EditableEncoding:
-        det_encoding: Encoding = self.tokenizer.encode(f"[CLS]{det_inchi}[SEP]")
+        det_encoding: Encoding = self.tokenizer.encode(f"[CLS]{det_inchi}[MASK]")
         pad_id = self.tokenizer.token_to_id('[PAD]')
+        mask_id = self.tokenizer.token_to_id('[MASK]')
         pad_size = len(src_encoding.ids) - len(det_encoding.ids)
         det_ids = det_encoding.ids
 
         if pad_size > 0:
-            pad_det_ids = det_ids + [pad_id] * pad_size
+            pad_det_ids = det_ids + [mask_id] * pad_size
             return EditableEncoding(
                 ids=pad_det_ids,
                 src_ids=src_encoding.ids,

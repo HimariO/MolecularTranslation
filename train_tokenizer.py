@@ -228,7 +228,8 @@ def handcraft():
     tokenizer.pre_tokenizer = pre_tokenizers.Split(pattern=units_rex, behavior="isolated")
     tokenizer.decoder = decoders.Decoder.custom(CustomDecoder())
     
-    encoding = tokenizer.encode("InChI=1S/C21H30O4/c1-12(22)25-14-6-8-20(2)13(10-14)11-17(23)19-15-4-5-18(24)21(15,3)9-7-16(19)20/h13-16,19H,4-11H2,1-3H3/t13-,14+,15+,16-,19-,20+,21+/m1/s1")
+    # encoding = tokenizer.encode("InChI=1S/C21H30O4/c1-12(22)25-14-6-8-20(2)13(10-14)11-17(23)19-15-4-5-18(24)21(15,3)9-7-16(19)20/h13-16,19H,4-11H2,1-3H3/t13-,14+,15+,16-,19-,20+,21+/m1/s1")
+    encoding = tokenizer.encode("InChI=1S/C11H7BrFN2/c1-6-7(4-14)5-15-11-9(13)3-2-8(12)10(6)11/h2-3,5,9,11H,1H2/q-1")
     print(encoding)
     print(encoding.ids)
     print(encoding.tokens)

@@ -1,21 +1,20 @@
-import tokenizers
-from dataset.collator import EncodedBatchCollator
-from json import load
 from numpy.lib.function_base import iterable
+
 import torch
 import torchvision as tv
 import pytorch_lightning as pl
-from torch.utils.data import DataLoader
 from loguru import logger
+from termcolor import colored
+from torch.utils.data import DataLoader
 from tokenizers import Tokenizer
 from transformers.models.bert.modeling_bert import BertConfig
-from dataset import pl_bms
 
 from model.oscar.modeling_bert import BertForImageCaptioning
 from model.efficientnet.net import EfficientNet
 from model.monocle import Monocle
 from dataset.pl_bms import LitBBMS, LitDetBBMS
 from dataset.tokenizer import basic_tokenizer
+from dataset.collator import EncodedBatchCollator
 
 
 # tk_model_file = "./checkpoints/bms_worldpiece_tokenizer.json"
@@ -50,15 +49,16 @@ def test_base_dataset(batch_size=8, max_cap_len=None):
     train_dir = "/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/val"
     labels = "/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train_labels.csv"
 
-    tokenizer = Tokenizer.from_file(tk_model_file)
+    # tokenizer = Tokenizer.from_file(tk_model_file)
+    tokenizer = basic_tokenizer(custom_decoder=True)
     bbms_coll = collator.EncodedBatchCollator()
     bbms = bms_caption.EncodedBBMS(
         train_dir, labels, tokenizer,
-        mlm=False, det_inchi=False, max_cap_len=max_cap_len, mask_prob=0.001)
-    loader = DataLoader(bbms, batch_size=batch_size, collate_fn=bbms_coll, num_workers=0)
+        mlm=False, det_inchi=True, max_cap_len=max_cap_len, mask_prob=0.001)
+    loader = DataLoader(bbms, batch_size=batch_size, collate_fn=bbms_coll, num_workers=0, shuffle=True)
     
     print(len(bbms))
-    print(bbms[1][2:])
+    # print(bbms[1][2:])
     for batch_ndx, sample in enumerate(loader):
         # print(sample)
         if batch_ndx > 16: break
@@ -85,7 +85,7 @@ def test_img_cap_bert():
 
     loader = test_base_dataset()
     sample = next(iter(loader))
-    sample = (to_cuda(s) for s in sample)
+    sample = [to_cuda(s) for s in sample[:8]]
     _, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample
     fake_img_feat = torch.normal(0, 1, size=[img.shape[0], atten_mask.shape[-1] - ids.shape[-1], 1540])
     fake_img_feat = fake_img_feat.cuda()
@@ -126,7 +126,7 @@ def test_beam_serach_bert():
     tokenizer = loader.dataset.tokenizer
     sample = next(iter(loader))
     sample = [sample[0]] + [to_cuda(s) for s in sample[1:]]
-    _, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample
+    _, img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample[:8]
     fake_img_feat = torch.normal(0, 1, size=[img.shape[0], atten_mask.shape[-1] - ids.shape[-1], 1540])
     fake_img_feat = fake_img_feat.cuda()
 
@@ -175,11 +175,12 @@ def test_monocle(ckpt=None, is_training=True, device='cuda:1', max_length=None, 
         else:
             raise RuntimeError(f"{type(stuff)} !?")
             
-    # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
     global tk_model_file
     # tokenizer = Tokenizer.from_file(tk_model_file)
+    # pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
     tokenizer = basic_tokenizer(custom_decoder=True)
-    pretrain_dir = "./config/bms_img_cap_bert/"
+    # pretrain_dir = "./config/bms_img_cap_bert/"
+    pretrain_dir = "./config/basic_tk_bms_bert/"
     config = BertConfig.from_pretrained(pretrain_dir)
     if ckpt:
         bert = Monocle.load_from_checkpoint(ckpt, bert_config=config)
@@ -195,10 +196,14 @@ def test_monocle(ckpt=None, is_training=True, device='cuda:1', max_length=None, 
         # n = loader.dataset.imgids.index('4cf6b16ffa89')
         # sample = loader.dataset[n]
         # sample = EncodedBatchCollator()([sample])
-        if i > 2: break
+        if i > 4: break
+        sample_ids = sample[0]
+        print(colored(sample_ids, color='blue'))
         sample = sample[1:]
-        sample = (to_cuda(s) for s in sample)
+        tokens = sample[-1]
+        sample = [to_cuda(s) for s in sample[:7]]
         img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample
+        ref_inchis = [''.join(t[1:]) for t in tokens]
 
         if beam_search:
             inputs = {
@@ -236,15 +241,20 @@ def test_monocle(ckpt=None, is_training=True, device='cuda:1', max_length=None, 
         output = bert(img, boxes, ids, **inputs)
         
         print(f'[{i}] seq_len: {ids.shape}, img size: {img.shape}, img_val_min_max: {img.min()}/{img.max()}')
+        input_strs = tokenizer.decode_batch(ids.cpu().numpy()[:, 1:])
+        print(colored("input_strs: ", color='green'), input_strs)
         if not is_training:
             if beam_search:
                 decoded = output[0]
                 print(decoded)
             else:
                 pred_ids = torch.argmax(output[0], dim=-1)
-                pred_strs = tokenizer.decode_batch(pred_ids.cpu().numpy())
+                pred_strs = tokenizer.decode_batch(pred_ids.cpu().numpy()[:, 1:])
+                print(mask_pos)
                 print(mask_ids)
                 print(pred_ids[:, 1:])
+                print(colored("pred_strs: ", color='green'), pred_strs)
+                print(colored("ref_inchis: ", color='green'), ref_inchis)
         else:
             loss, logits = output[:2]
             print('loss: ', loss)
@@ -288,7 +298,7 @@ def test_monocle_overfit(ckpt=None, is_training=True, device='cuda:0', max_lengt
             break
         sample = sample[1:]
         sample = [to_cuda(s) for s in sample]
-        img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample[:8]
+        img, boxes, ids, type_ids, atten_mask, mask_pos, mask_ids = sample[:7]
 
         for j in range(128):
             adam.zero_grad()
@@ -340,19 +350,50 @@ def test_lit_data():
         if i > 1: break
 
 
+def transfer_coco_cap_weight():
+    pretrain_dir = "/home/ron/Downloads/coco_captioning_base_scst/checkpoint-15-66405"
+    config = BertConfig.from_pretrained(pretrain_dir)
+    bert = BertForImageCaptioning.from_pretrained(pretrain_dir, config=config)
+
+    pretrain_dir = "./config/basic_tk_bms_bert/"
+    ckpt = "/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_8/checkpoints/epoch=0-step=103332.ckpt"
+    config = BertConfig.from_pretrained(pretrain_dir)
+    monocle = Monocle(config)
+    mono_state = monocle.state_dict()
+    ckpt_state = torch.load(ckpt)['state_dict']
+    match_state = {
+        k: (ckpt_state[k] if ckpt_state[k].shape == mono_state[k].shape else mono_state[k])
+        for k in mono_state.keys()
+    }
+    # monocle = Monocle.load_from_checkpoint(ckpt, bert_config=config)
+    monocle.load_state_dict(match_state)
+
+    coco_state = bert.state_dict()
+    mono_state = monocle.bert.state_dict()
+    assert len(coco_state) == len(mono_state)
+    match_state = {
+        k: (coco_state[k] if coco_state[k].shape == mono_state[k].shape else mono_state[k])
+        for k in mono_state.keys()
+    }
+    monocle.bert.load_state_dict(match_state, strict=True)
+    torch.save(monocle.state_dict(), "checkpoints/coco_monocle.pth")
+
+
 with logger.catch(reraise=True):
     # test_visual_feat_extract()
     # test_base_dataset()
     # test_img_cap_bert()
-    test_monocle(
-        is_training=False,
-        beam_search=False,
-        max_length=200,
-        ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_3/checkpoints/epoch=0-step=53999.ckpt"
-    )
+    # test_monocle(
+    #     is_training=False,
+    #     beam_search=False,
+    #     max_length=None,
+    #     ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_8/checkpoints/epoch=0-step=103332.ckpt",
+    #     device='cuda:1'
+    # )
     # test_monocle()
 
     # test_beam_serach_bert()
 
     # test_lit_data()
     # test_monocle_overfit()
+    transfer_coco_cap_weight()
