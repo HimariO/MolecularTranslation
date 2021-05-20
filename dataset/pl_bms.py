@@ -32,7 +32,7 @@ class RandSampleDataset:
 class LitBBMS(pl.LightningDataModule):
 
     def __init__(self, train_dir: str, val_dir: str, tokenizer: Tokenizer, anno_csv: str,
-                val_anno_csv=None, batch_size=8, num_worker=4):
+                val_anno_csv=None, test_dir=None, batch_size=8, num_worker=4):
         super().__init__()
         self.train_dir = train_dir
         self.val_dir = val_dir
@@ -53,7 +53,7 @@ class LitBBMS(pl.LightningDataModule):
             self.anno_csv,
             self.tokenizer,
             mlm=False)
-        zip_dataset = RandSampleDataset([mlm_dataset, mask_dataset])
+        zip_dataset = RandSampleDataset([mlm_dataset, ])
         loader = DataLoader(
             zip_dataset,
             shuffle=True,
@@ -68,7 +68,7 @@ class LitBBMS(pl.LightningDataModule):
             self.val_dir,
             self.val_anno_csv,
             self.tokenizer,
-            mlm=False)
+            mlm=True)
         loader = DataLoader(
             dataset,
             shuffle=False,

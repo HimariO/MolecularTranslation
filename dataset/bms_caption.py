@@ -207,7 +207,7 @@ class EncodedBBMS(BoxedBMS):
             i = a
             groups = []
             while i < b:
-                group_size = random.randint(2, 4)
+                group_size = random.randint(1, 2)
                 groups.append([i, min(b, i + group_size)])
                 i += group_size + 1
             random.shuffle(groups)
@@ -252,7 +252,7 @@ class EncodedBBMS(BoxedBMS):
             if self.det_inchi:
                 if random.random() <= 0.1:
                     # 10% chance to be a random word ((1-0.8)*0.5)
-                    i = random.randint(0, self.tokenizer.get_vocab_size() - 1)
+                    i = random.randint(5, self.tokenizer.get_vocab_size() - 1)
                     input_ids[pos] = i
                 else:
                     # 10% chance to remain the same (1-0.8-0.1)

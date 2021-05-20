@@ -433,12 +433,12 @@ class BertForImageCaptioning(CaptionPreTrainedModel):
         if is_decode:
             return self.generate(*args, **kwargs)
         else:
-            del kwargs['is_decode']
+            # del kwargs['is_decode']
             return self.encode_forward(*args, **kwargs)
 
     def encode_forward(self, input_ids, img_feats, attention_mask, masked_pos, masked_ids=None, 
             token_type_ids=None, position_ids=None, head_mask=None,
-            is_training=True, encoder_history_states=None):
+            is_training=True, encoder_history_states=None, **kwargs):
         outputs = self.bert(input_ids, img_feats=img_feats, attention_mask=attention_mask, 
                 position_ids=position_ids, token_type_ids=token_type_ids,
                 head_mask=head_mask,
@@ -609,13 +609,13 @@ class BertForImageCaptioning(CaptionPreTrainedModel):
             assert input_ids.shape[0] == batch_size
             od_label_ids = input_ids[:, self.max_seq_len:]
             self.od_labels_len = input_ids.shape[1] - self.max_seq_len
-            # input_ids = None
+            input_ids = None
         else:
             self.od_labels_len = 0
             od_label_ids = None
             assert input_ids.shape == (batch_size, self.max_seq_len), \
                 f"{input_ids.shape} != {(batch_size, self.max_seq_len)}"
-            # input_ids = None
+            input_ids = None
 
         if input_ids is None:
             input_ids = torch.full(

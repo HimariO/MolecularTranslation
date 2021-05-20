@@ -146,8 +146,13 @@ class Monocle(pl.LightningModule):
         masked_ids = mask_ids[mask_ids != 0]
         # batch_score = compute_score_with_logits(logits, masked_ids)
         # batch_acc = torch.sum(batch_score.float()) / torch.sum(mask_pos)
+        
+        tensorboard = self.logger.experiment
+        pred_ids = pred.argmax(dim=-1)
+        if batch_idx % 100 == 0:
+            tensorboard.add_histogram('val_batch_pred', pred_ids, global_step=batch_idx)
+        
         if not self.tokenizer is None and batch_idx % 50 == 0:
-            pred_ids = pred.argmax(dim=-1)
             pred_ids = pred_ids.cpu().numpy().tolist()
             pred_ids = [
                 [p for p in pred if p != PAD_TOKEN_ID]
@@ -156,8 +161,7 @@ class Monocle(pl.LightningModule):
             pred_strs = self.tokenizer.decode_batch(pred_ids)
             log_str = "\n\n".join([f"[{j}] {s}" for j, s in enumerate(pred_strs)])
 
-            tensorboard = self.logger.experiment
-            tensorboard.add_text('train_batch_pred_txt', log_str, global_step=batch_idx)
+            tensorboard.add_text('val_batch_pred_txt', log_str, global_step=batch_idx)
 
         partial_pred = pred[mask_pos != 0][masked_ids != 4]
         partial_maskid = masked_ids[masked_ids != 4]

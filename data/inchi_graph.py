@@ -240,5 +240,5 @@ def debug():
 
 
 if __name__ == '__main__':
-    generate_det_inchi('/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train')
+    generate_det_inchi('/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/test')
     # debug()

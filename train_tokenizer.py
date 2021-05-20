@@ -28,6 +28,11 @@ def handcraft():
         ',': 193,
         '-': 194,
         'InChI=1S/': 195,
+        '/q': 196,
+        '.': 197,
+        ';': 198,
+        '*': 199,
+        '/p': 200,
         '/b': 5,
         '/c': 6,
         '/h': 7,
@@ -214,7 +219,7 @@ def handcraft():
         'Si': 188,
         'T': 189,
     }
-    units = [k for k in vocab.keys() if len(k) > 1] + ['.']
+    units = [k.replace('[', '\[').replace(']', '\]') for k in vocab.keys() if len(k) > 1] + ['.']
     units = sorted(units, key=lambda x: len(x), reverse=True)
     print("|".join(units))
     units_rex = Regex("|".join(units))
@@ -229,11 +234,19 @@ def handcraft():
     tokenizer.decoder = decoders.Decoder.custom(CustomDecoder())
     
     # encoding = tokenizer.encode("InChI=1S/C21H30O4/c1-12(22)25-14-6-8-20(2)13(10-14)11-17(23)19-15-4-5-18(24)21(15,3)9-7-16(19)20/h13-16,19H,4-11H2,1-3H3/t13-,14+,15+,16-,19-,20+,21+/m1/s1")
-    encoding = tokenizer.encode("InChI=1S/C11H7BrFN2/c1-6-7(4-14)5-15-11-9(13)3-2-8(12)10(6)11/h2-3,5,9,11H,1H2/q-1")
+    # encoding = tokenizer.encode("InChI=1S/C11H7BrFN2/c1-6-7(4-14)5-15-11-9(13)3-2-8(12)10(6)11/h2-3,5,9,11H,1H2/q-1")
+    # encoding = tokenizer.encode("InChI=1S/C20H15F3N10O3/c1-10(33-9-28-15-14(33)17(35)32(4-3-24)19(36)31(15)2)16(34)30-13-8-25-7-12(29-13)11-5-26-18(27-6-11)20(21,22)23/h5-10H,4H2,1-2H3,(H,29,30,34)/t10-/m0/s1")
+    # inchi_str = "InChI=1S/C9H10O2S.C7H12N2O4P.H2I/c1-6-3-4-7(5-8(6)12)9(10)11-2;10-6-4-2-1-3-5(6)7(11)8-9-14(12)13;/h3-5,12H,1-2H3;3-4,7-12H,1-2H2;1H2/q;-1;+1"
+    # inchi_str = "InChI=1S/C23H21FN2O3S.C7H9NO2S/c1-16-7-13-20(14-8-16)30(28,29)25-15-17(2)26(19-11-9-18(24)10-12-19)23(27)21-5-3-4-6-22(21)25;1-6-2-4-7(5-3-6)11(8,9)10/h3-14,17H,15H2,1-2H3;2-5H,1H3,(H2,8,9,10)"
+    # inchi_str = "InChI=1S/C17H33FO5.ClH.FH.H2O/c1-14-11-16(3-4-17(14)19)13-23-10-8-21-6-5-20-7-9-22-12-15(2)18;;;/h14-17,19H,3-13H2,1-2H3;2*1H;1H2"
+    # inchi_str = "InChI=1S/C13H19N3O.C11H14IN3O/c1-2-15-6-8-16(9-7-15)13(17)11-4-3-5-12(14)10-11;1-6(2)15-7(3)11(16)14-8-5-13-10(12)4-9(8)15/h3-5,10H,2,6-9,14H2,1H3;4-7,12H,1-3H3/p+1"
+    inchi_str = "InChI=1S/C13H10ClF3N2O3S.ClH/c14-10-3-1-7(5-9(10)13(15,16)17)19-23(21,22)8-2-4-11(18)12(20)6-8;/h1-6,19-20H,18H2;1H/p-1"
+    encoding = tokenizer.encode(inchi_str)
     print(encoding)
     print(encoding.ids)
     print(encoding.tokens)
     print(tokenizer.decode(encoding.ids))
+    print(inchi_str)
     # tokenizer.save("./checkpoints/handcraft_tokenizer.json")
 
 

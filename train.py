@@ -25,7 +25,7 @@ def test_monocle_pl_trainer(overfit=True, ckpt=None, state_dict=None, batch_size
     global tk_model_file
     # tokenizer = Tokenizer.from_file(tk_model_file)
     tokenizer = basic_tokenizer()
-    lit_dataset = LitDetBBMS(
+    lit_dataset = LitBBMS(
         '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/train',
         '/home/ron/Downloads/bms-molecular-translation/bms-molecular-translation/val',
         tokenizer,
@@ -39,8 +39,10 @@ def test_monocle_pl_trainer(overfit=True, ckpt=None, state_dict=None, batch_size
     pretrain_dir = "./config/basic_tk_bms_bert/"
     config = BertConfig.from_pretrained(pretrain_dir)
     if ckpt:
+        logger.info(f'Load ckpt: {ckpt}')
         bert = Monocle.load_from_checkpoint(ckpt, bert_config=config)
     elif state_dict:
+        logger.info(f'Load state_dict: {state_dict}')
         bert = Monocle(config)
         bert.load_state_dict(torch.load(state_dict))
     else:
@@ -62,7 +64,7 @@ def test_monocle_pl_trainer(overfit=True, ckpt=None, state_dict=None, batch_size
     else:
         trainer = pl.Trainer(
             fast_dev_run=False,
-            accumulate_grad_batches=1,
+            accumulate_grad_batches=2,
             gradient_clip_val=1.0,
             val_check_interval=2500,
             checkpoint_callback=True,
@@ -84,7 +86,7 @@ def test_monocle_pl_trainer(overfit=True, ckpt=None, state_dict=None, batch_size
 
 with logger.catch(reraise=True):
     test_monocle_pl_trainer(
-        ckpt=None,
+        # ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_15/checkpoints/epoch=0-step=48961.ckpt",
         state_dict="checkpoints/coco_monocle.pth",
         overfit=False,
         batch_size=12,
