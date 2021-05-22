@@ -2,6 +2,7 @@ import pickle
 from numpy.lib.function_base import iterable
 import glob
 import torch
+import numpy as np
 import torchvision as tv
 import pytorch_lightning as pl
 from loguru import logger
@@ -56,13 +57,24 @@ def test_base_dataset(batch_size=8, max_cap_len=None):
     bbms = bms_caption.EncodedBBMS(
         train_dir, labels, tokenizer,
         mlm=False, det_inchi=False, max_cap_len=max_cap_len, mask_prob=0.001)
-    loader = DataLoader(bbms, batch_size=batch_size, collate_fn=bbms_coll, num_workers=0, shuffle=True)
+    batch_sampler = bms_caption.BinedBatchSampler(bbms, batch_size=batch_size)
+    loader = DataLoader(
+        bbms, batch_size=batch_size, collate_fn=bbms_coll, 
+        num_workers=0, shuffle=True)
+    # loader = DataLoader(
+    #     bbms, batch_size=1, collate_fn=bbms_coll, 
+    #     num_workers=0, shuffle=False, batch_sampler=batch_sampler)
+    # bins = bbms.create_token_bins()
     
     print(len(bbms))
     # print(bbms[1][2:])
     for batch_ndx, sample in enumerate(loader):
         # print(sample)
-        if batch_ndx > 16: break
+        ids = sample[3]
+        ne = torch.ones_like(ids).sum()
+        num_pad = (ids == 3).int().sum()
+        print(f"percent padded: {num_pad/ne}, {num_pad}/{ne}")
+        if batch_ndx > 4: break
     return loader
 
 
@@ -401,16 +413,16 @@ with logger.catch(reraise=True):
     # test_visual_feat_extract()
     # test_base_dataset()
     # test_img_cap_bert()
-    # test_monocle(
-    #     is_training=False,
-    #     beam_search=True,
-    #     max_length=200,
-    #     ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_16/checkpoints/epoch=0-step=50632.ckpt",
-    #     device='cuda:0'
-    # )
+    test_monocle(
+        is_training=False,
+        beam_search=True,
+        max_length=200,
+        ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_21/checkpoints/epoch=4-step=151165.ckpt",
+        device='cuda:0'
+    )
     # test_monocle()
 
-    test_beam_serach_bert()
+    # test_beam_serach_bert()
 
     # test_lit_data()
     # test_monocle_overfit()

@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 from torch import nn
 from torch.nn import functional as F
 from tokenizers import Tokenizer
+from loguru import logger
 
 from .oscar.modeling_bert import BertForImageCaptioning, BertConfig
 from .oscar.mlm import compute_score_with_logits
@@ -165,13 +166,18 @@ class Monocle(pl.LightningModule):
 
         partial_pred = pred[mask_pos != 0][masked_ids != 4]
         partial_maskid = masked_ids[masked_ids != 4]
-        self.val_accuracy(partial_pred, partial_maskid)
+        try:
+            self.val_accuracy(partial_pred, partial_maskid)
+        except:
+            # import pdb; pdb.set_trace()
+            logger.warning(f'Nan in batch: {keys}')
         return {
             'predict': torch.max(logits, -1)[1].data
         }
     
     def validation_epoch_end(self, validation_step_outputs):
         self.log('val_aucc_epoch', self.val_accuracy.compute(), prog_bar=True)
+        self.val_accuracy.reset()
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=0.0001)
+        return torch.optim.Adam(self.parameters(), lr=0.00001)

@@ -75,7 +75,7 @@ def test_monocle_pl_trainer(overfit=True, ckpt=None, state_dict=None, batch_size
             # distributed_backend='ddp',
             precision=16,
             # max_steps=1000,
-            # resume_from_checkpoint=resume_ckpt,
+            resume_from_checkpoint=ckpt,
             # num_sanity_val_steps=0,
             # overfit_batches=32,
             max_epochs=100,
@@ -86,8 +86,8 @@ def test_monocle_pl_trainer(overfit=True, ckpt=None, state_dict=None, batch_size
 
 with logger.catch(reraise=True):
     test_monocle_pl_trainer(
-        # ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_15/checkpoints/epoch=0-step=48961.ckpt",
-        state_dict="checkpoints/coco_monocle.pth",
+        ckpt="/home/ron/Projects/MolecularTranslation/checkpoints/dev/lightning_logs/version_20/checkpoints/epoch=3-step=107108.ckpt",
+        # state_dict="checkpoints/coco_monocle.pth",
         overfit=False,
         batch_size=12,
     )

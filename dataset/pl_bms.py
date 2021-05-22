@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from tokenizers import Tokenizer
 
-from .bms_caption import EncodedBBMS
+from .bms_caption import EncodedBBMS, BinedBatchSampler
 from .collator import EncodedBatchCollator
 
 
@@ -48,11 +48,19 @@ class LitBBMS(pl.LightningDataModule):
             self.anno_csv,
             self.tokenizer,
             mlm=True)
-        mask_dataset = EncodedBBMS(
-            self.train_dir,
-            self.anno_csv,
-            self.tokenizer,
-            mlm=False)
+        # batch_sampler = BinedBatchSampler(mlm_dataset, batch_size=self.batch_size)
+        # loader = DataLoader(
+        #     mlm_dataset,
+        #     num_workers=self.num_worker,
+        #     batch_sampler=batch_sampler,
+        #     collate_fn=EncodedBatchCollator(),
+        #     worker_init_fn=worker_init_fn)
+        
+        # mask_dataset = EncodedBBMS(
+        #     self.train_dir,
+        #     self.anno_csv,
+        #     self.tokenizer,
+        #     mlm=False)
         zip_dataset = RandSampleDataset([mlm_dataset, ])
         loader = DataLoader(
             zip_dataset,

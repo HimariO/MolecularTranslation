@@ -7,7 +7,7 @@ import random
 import pickle
 import hashlib
 from collections import defaultdict, namedtuple
-from typing import Tuple, Union
+from typing import Tuple, Union, Dict, List
 
 import cv2
 import torch
@@ -188,16 +188,41 @@ class EncodedBBMS(BoxedBMS):
         #     """
         #     assert self.mlm
     
-    def create_token_bins(self, bin_size=25):
-        id2len = {k: len(v) for k, v in self.id2cap.items()}
+    def create_token_bins(self, bin_size=25, min_bin_sample=64) -> Dict[int, List[int]]:
+        
+        def merge_small_bin(bins, reverse=False):
+            merged_bins = {}
+            last_bin = None
+            for k in sorted(bins.keys(), reverse=reverse):
+                samples = bins[k]
+                if len(samples) < min_bin_sample:
+                    if last_bin is not None:
+                        merged_bins[last_bin] += samples
+                    else:
+                        merged_bins[k] = samples
+                        last_bin = k
+                else:
+                    merged_bins[k] = samples
+                    last_bin = k
+            return merged_bins
+        
+        id2len = {
+            k: len(self.tokenizer.encode(v).tokens)
+            for k, v in self.id2cap.items()}
         id2idx = {v: i for i, v in enumerate(self.imgids)}
         bins = defaultdict(list)
         for k in self.imgids:
             l = id2len[k]
             bin_id = math.ceil(l / bin_size)
             bins[bin_id].append(id2idx[k])
-        logger.info(f"Created {len(bins)} bins with bin size {bin_size}")
-        return bins
+        
+        merged_bins = merge_small_bin(bins)
+        merged_bins = merge_small_bin(merged_bins, reverse=True)
+
+        assert sum([len(v) for v in merged_bins.values()]) == len(self)
+        logger.info(f"Created {len(merged_bins)} bins with bin size {bin_size}")
+        logger.info(f"Bins: {[(k, len(v)) for k, v in merged_bins.items()]}")
+        return merged_bins
             
     def random_mask_caption(self,
                             encoding: Union[Encoding, EditableEncoding],
@@ -258,16 +283,19 @@ class EncodedBBMS(BoxedBMS):
                     # 10% chance to remain the same (1-0.8-0.1)
                     pass
             else:
-                if random.random() <= 0.8:
-                    # 80% chance to be a ['MASK'] token
-                    input_ids[pos] = self.tokenizer.token_to_id('[MASK]')
-                elif random.random() <= 0.5:
-                    # 10% chance to be a random word ((1-0.8)*0.5)
-                    i = random.randint(0, self.tokenizer.get_vocab_size() - 1)
-                    input_ids[pos] = i
+                if self.mlm:
+                    if random.random() <= 0.8:
+                        # 80% chance to be a ['MASK'] token
+                        input_ids[pos] = self.tokenizer.token_to_id('[MASK]')
+                    elif random.random() <= 0.5:
+                        # 10% chance to be a random word ((1-0.8)*0.5)
+                        i = random.randint(0, self.tokenizer.get_vocab_size() - 1)
+                        input_ids[pos] = i
+                    else:
+                        # 10% chance to remain the same (1-0.8-0.1)
+                        pass
                 else:
-                    # 10% chance to remain the same (1-0.8-0.1)
-                    pass
+                    input_ids[pos] = self.tokenizer.token_to_id('[MASK]')
         masked_pos[masked_idx] = 1
 
         if self.max_cap_len is not None:
@@ -398,3 +426,27 @@ class EncodedBBMS(BoxedBMS):
         encoding = self.random_mask_caption(encoding, is_mlm=self.mlm)
         encoding = self.extend_visual_atten(encoding, boxes)
         return key, img, boxes, encoding
+
+
+class BinedBatchSampler:
+    def __init__(self, dataset: EncodedBBMS, batch_size=12, shuffle=True):
+        self._dataset = dataset
+        self.bins = dataset.create_token_bins(bin_size=32)
+        self.batch_size = batch_size
+        self.n_batches = math.ceil(len(dataset) / batch_size)
+        self.shuffle = shuffle
+
+    def __iter__(self):        
+        batches = []
+        logger.info("[BinedBatchSampler] creat iterator")
+
+        for bin_i, idx in self.bins.items():
+            if self.shuffle:
+                random.shuffle(idx)
+            for i in range(0, len(idx), self.batch_size):
+                batch = idx[i: i + self.batch_size]
+                if len(batch) < self.batch_size:
+                    batch += random.choices(idx, k=self.batch_size - len(batch))
+                batches.append(batch)
+        random.shuffle(batches)
+        return iter(batches)
